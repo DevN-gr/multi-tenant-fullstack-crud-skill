@@ -1,0 +1,17 @@
+# The skeleton in samples/ is meant to be read and run, never installed into.
+node_modules/
+package-lock.json
+
+# Anything a local run of samples/ leaves behind.
+*.sqlite
+*.sqlite3
+.env
+.env.*
+!.env.example
+
+# Editor and OS noise.
+.DS_Store
+Thumbs.db
+*.swp
+.idea/
+.vscode/

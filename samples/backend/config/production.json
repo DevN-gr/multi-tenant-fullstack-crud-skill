@@ -1,0 +1,8 @@
+{
+  "log_level": "info",
+  "log_pretty": false,
+  "db_logging": false,
+
+  "auth": { "cookie_secure": true },
+  "mail": { "transport": "smtp" }
+}

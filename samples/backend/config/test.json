@@ -1,0 +1,16 @@
+{
+  "log_level": "silent",
+  "log_pretty": false,
+  "db_logging": false,
+
+  "auth": {
+    "cookie_secure": false,
+    "_comment": "4 rounds, not 12: the suite hashes hundreds of passwords and bcrypt cost is the whole runtime. Never inherited by another environment — default.json keeps 12.",
+    "bcrypt_rounds": 4
+  },
+
+  "mail": {
+    "_comment": "Nothing leaves the process. Tests assert against an in-memory transport, which is what makes the invite and reset flows testable end to end.",
+    "transport": "memory"
+  }
+}

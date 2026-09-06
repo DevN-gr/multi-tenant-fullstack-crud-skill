@@ -1,0 +1,43 @@
+# ══════════════════════════════════════════════════════════════════════════
+#  Both images build from the repository root, because shared/ is copied into
+#  each of them. This keeps the context small without starving those copies.
+# ══════════════════════════════════════════════════════════════════════════
+
+# Dependencies — reinstalled inside the image from the lockfile
+node_modules/
+**/node_modules/
+.npm/
+npm-debug.log*
+
+# Secrets and local state
+.env
+.env.*
+!.env.example
+backend/db/
+*.sqlite
+*.sqlite-journal
+
+# Version control and editors
+.git/
+.gitignore
+.vscode/
+.idea/
+
+# Development-only trees. The web image needs docs/ (the manual is linked from
+# the app), so docs/ is NOT excluded — only the tooling around it.
+tests/
+tools/smoke.js
+tools/check-*.js
+letsencrypt/
+ops/
+
+# Documentation for developers rather than for the app
+AGENTS.md
+CLAUDE.md
+README.md
+.claude/
+docs/agents/
+
+# OS noise
+.DS_Store
+Thumbs.db

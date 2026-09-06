@@ -1,0 +1,20 @@
+{
+  "name": "acme",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Acme — multi-tenant Node/Express API, vanilla HTML/CSS/JS frontend with no build step.",
+  "scripts": {
+    "test": "node tests/run-tests.js",
+    "test:backend": "npm --prefix backend test",
+    "test:all": "npm test && npm run test:backend",
+    "smoke": "node tools/smoke.js",
+    "verify": "npm run test:all && npm run smoke && npm run check",
+    "serve": "node tools/server.js",
+    "dev": "npm --prefix backend run dev",
+    "check": "npm run check:env",
+    "check:env": "node tools/check-env.js"
+  },
+  "devDependencies": {
+    "puppeteer": "^23.11.1"
+  }
+}

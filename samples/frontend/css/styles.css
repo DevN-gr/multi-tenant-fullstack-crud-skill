@@ -1,0 +1,91 @@
+/* ══════════════════════════════════════════════════════════════════════════
+   Tokens first, then components. Every colour, radius and space used anywhere
+   in the app is a custom property defined HERE — a check script can then fail
+   a raw hex or a magic pixel value in a component rule, which is what keeps
+   two screens from drifting apart.
+
+   Both themes are defined together. A colour whose only definition lives
+   inside a media query has no value in the other theme.
+   ═══════════════════════════════════════════════════════════════════════ */
+:root {
+  --bg: #ffffff;
+  --surface: #f7f7f8;
+  --text: #16181d;
+  --text-2: #5b6270;
+  --border: #e3e5ea;
+  --accent: #0f766e;
+  --danger: #b3261e;
+
+  --r-1: 6px;
+  --r-2: 10px;
+  --s-1: 8px;
+  --s-2: 16px;
+  --s-3: 24px;
+}
+
+:root[data-theme="dark"],
+:root:not([data-theme="light"]) {
+  color-scheme: light;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #14161a;
+    --surface: #1c1f25;
+    --text: #eceef2;
+    --text-2: #a2aab8;
+    --border: #2b2f37;
+    color-scheme: dark;
+  }
+}
+
+:root[data-theme="dark"] {
+  --bg: #14161a;
+  --surface: #1c1f25;
+  --text: #eceef2;
+  --text-2: #a2aab8;
+  --border: #2b2f37;
+  color-scheme: dark;
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--text);
+  font: 14px/1.5 system-ui, -apple-system, Segoe UI, sans-serif;
+}
+
+.app-root { display: grid; grid-template-columns: 200px 1fr; min-height: 100vh; }
+.side { border-inline-end: 1px solid var(--border); padding: var(--s-2); display: grid; gap: var(--s-1); align-content: start; }
+.side a { color: var(--text-2); text-decoration: none; padding: var(--s-1); border-radius: var(--r-1); }
+.side a.on { background: var(--surface); color: var(--text); }
+.main { padding: var(--s-3); }
+
+.page-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: var(--s-2); }
+.page-title { font-size: 20px; margin: 0; }
+
+.table { width: 100%; border-collapse: collapse; }
+.table th, .table td { text-align: start; padding: var(--s-1); border-bottom: 1px solid var(--border); }
+.table .num { text-align: end; font-variant-numeric: tabular-nums; }
+.table tbody tr { cursor: pointer; }
+
+.empty { color: var(--text-2); padding: var(--s-3); text-align: center; }
+.skeleton { height: 200px; background: var(--surface); border-radius: var(--r-2); }
+.badge { border: 1px solid var(--border); border-radius: var(--r-1); padding: 0 6px; font-size: 12px; }
+.meter { height: 6px; background: var(--surface); border-radius: var(--r-1); overflow: hidden; }
+.meter-fill { height: 100%; background: var(--accent); }
+
+.toast-root { position: fixed; inset-block-end: var(--s-2); inset-inline: 0; display: grid; justify-items: center; }
+.toast { background: var(--text); color: var(--bg); padding: var(--s-1) var(--s-2); border-radius: var(--r-2); }
+.toast.error { background: var(--danger); color: #fff; }
+
+.modal { position: fixed; inset: 0; display: grid; place-items: center; background: rgba(0,0,0,.4); }
+.modal form { background: var(--bg); padding: var(--s-3); border-radius: var(--r-2); display: grid; gap: var(--s-2); min-width: 320px; }
+
+/* One column below the phone breakpoint. Check every screen at 390px. */
+@media (max-width: 720px) {
+  .app-root { grid-template-columns: 1fr; }
+  .side { display: flex; overflow-x: auto; border-inline-end: 0; border-block-end: 1px solid var(--border); }
+}

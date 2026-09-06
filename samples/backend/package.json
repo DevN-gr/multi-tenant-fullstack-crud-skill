@@ -1,0 +1,30 @@
+{
+  "name": "acme-backend",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Acme API — Express + Sequelize. MySQL in production, SQLite for local development and tests.",
+  "scripts": {
+    "start": "NODE_ENV=production node ./bin/www",
+    "dev": "NODE_ENV=development nodemon ./bin/www",
+    "nodev": "NODE_ENV=development node ./bin/www",
+    "test": "NODE_ENV=test NODE_CONFIG='{\"log_level\":\"silent\"}' node --test 'test/**/*.test.js'"
+  },
+  "dependencies": {
+    "bcryptjs": "^2.4.3",
+    "config": "^3.3.11",
+    "cookie-parser": "^1.4.6",
+    "cors": "^2.8.5",
+    "express": "^4.19.2",
+    "jsonwebtoken": "^9.0.2",
+    "mysql2": "^3.15.0",
+    "pino": "8.21.0",
+    "pino-http": "8.6.1",
+    "sequelize": "^6.37.2"
+  },
+  "devDependencies": {
+    "@faker-js/faker": "^8.4.1",
+    "nodemon": "^3.1.0",
+    "pino-pretty": "10.3.1",
+    "sqlite3": "^5.1.7"
+  }
+}

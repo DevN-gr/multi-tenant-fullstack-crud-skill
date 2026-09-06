@@ -1,0 +1,8 @@
+{
+  "log_level": "debug",
+  "log_pretty": true,
+  "db_logging": false,
+
+  "auth": { "cookie_secure": false },
+  "mail": { "transport": "console" }
+}

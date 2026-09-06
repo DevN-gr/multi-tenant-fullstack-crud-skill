@@ -1,0 +1,41 @@
+{
+  "_comment": "Baseline settings. Anything that varies per deployment, and everything secret, arrives as an environment variable named in custom-environment-variables.json. A setting that has only ever had one value belongs here, not in a new variable.",
+
+  "log_level": "info",
+  "log_pretty": false,
+  "db_logging": false,
+
+  "api_prefix": "/v1/api",
+
+  "auth": {
+    "access_ttl_minutes": 30,
+    "refresh_ttl_days": 30,
+    "invite_ttl_hours": 168,
+    "reset_ttl_hours": 2,
+    "min_password_length": 12,
+    "cookie_name": "acme_at",
+    "refresh_cookie_name": "acme_rt",
+    "csrf_cookie_name": "acme_csrf",
+    "csrf_header": "x-csrf-token",
+    "cookie_secure": true,
+    "cookie_same_site": "lax",
+    "bcrypt_rounds": 12
+  },
+
+  "mail": {
+    "transport": "console",
+    "from_address": "noreply@example.com",
+    "from_name": "Acme",
+    "app_url": "http://127.0.0.1:5173",
+    "smtp": { "host": "", "port": 587, "secure": false, "user": "", "password": "" }
+  },
+
+  "superadmin": {
+    "_comment": "Bootstrapped on first boot when the users table is empty, so a fresh deployment has somebody who can create the first owner. Set a real password through the environment; the default one is refused outside development.",
+    "email": "superadmin@example.com",
+    "name": "Acme",
+    "password": "change-me"
+  },
+
+  "cors_origins": ["http://127.0.0.1:5173", "http://localhost:5173"]
+}

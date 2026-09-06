@@ -1,0 +1,87 @@
+# ══════════════════════════════════════════════════════════════════════════
+#  Acme — local stack.
+#
+#      docker compose -f docker-compose.dev.yml up --build
+#
+#      web   http://localhost:5173     the app
+#      api   http://localhost:3000     also proxied at /v1/api by web
+#      mail  http://localhost:8025     every invite and reset lands here
+#      db    localhost:3307            MySQL, so what is tested is what ships
+#
+#  MySQL rather than SQLite on purpose: SQLite is the test dialect, and a
+#  local stack that never touches MySQL is a local stack that cannot catch a
+#  MySQL-only problem. Nothing here is secret and nothing here is safe — the
+#  passwords are literal because this file is not for production.
+# ══════════════════════════════════════════════════════════════════════════
+name: acme-dev
+
+services:
+  api:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+    command: sh -c "node bin/www"
+    environment:
+      NODE_ENV: qa                 # MySQL, but without production's guards
+      PORT: 3000
+      MYSQL_HOST: db
+      MYSQL_PORT: 3306
+      MYSQL_DATABASE: acme
+      MYSQL_USER: acme
+      MYSQL_PASSWORD: acme
+      JWT_SECRET: development-only-secret-not-for-deployment
+      COOKIE_SECURE: "false"       # no TLS in front of it here
+      LOG_LEVEL: debug
+      MAIL_TRANSPORT: smtp
+      SMTP_HOST: mail
+      SMTP_PORT: 1025
+      SMTP_SECURE: "false"
+      MAIL_FROM_ADDRESS: noreply@acme.local
+      MAIL_FROM_NAME: Acme
+      APP_URL: http://localhost:5173
+      # Exact origins: the session runs with credentials, which forbids a
+      # wildcard. Direct browser access to :3000 is what needs these; through
+      # the web proxy it is same-origin and CORS never comes up.
+      CORS_ORIGIN: http://localhost:5173,http://127.0.0.1:5173
+      SUPERADMIN_EMAIL: superadmin@acme.local
+      SUPERADMIN_PASSWORD: development-superadmin
+    ports:
+      - "3000:3000"
+    depends_on:
+      db:
+        condition: service_healthy
+
+  web:
+    build:
+      context: .
+      dockerfile: frontend/Dockerfile
+    environment:
+      PORT: 3010
+      HOST: 0.0.0.0
+      API_ORIGIN: http://api:3000
+    ports:
+      - "5173:3010"
+    depends_on:
+      - api
+
+  db:
+    image: mysql:8.0
+    command: --character-set-server=utf8mb4 --collation-server=utf8mb4_unicode_ci
+    environment:
+      MYSQL_ROOT_PASSWORD: root
+      MYSQL_DATABASE: acme
+      MYSQL_USER: acme
+      MYSQL_PASSWORD: acme
+    ports:
+      - "3307:3306"
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "127.0.0.1", "-u", "acme", "-pacme"]
+      interval: 10s
+      timeout: 5s
+      retries: 15
+
+  # Catches every invite and reset so the mail flows can be driven end to end.
+  mail:
+    image: axllent/mailpit:latest
+    ports:
+      - "8025:8025"

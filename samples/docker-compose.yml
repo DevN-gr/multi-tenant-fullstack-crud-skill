@@ -1,0 +1,184 @@
+# ══════════════════════════════════════════════════════════════════════════
+#  Acme — production.
+#
+#      cp .env.example .env && $EDITOR .env
+#      docker compose up -d --build
+#
+#  Traefik terminates TLS and routes two hosts:
+#
+#      app.example.com   the app, and /v1/api proxied to the API by the web
+#                        container — so the browser only ever talks to one
+#                        origin and the session cookie needs no CORS and no
+#                        third-party-cookie exemption.
+#      api.example.com   the API directly, for anything that is not a browser.
+#
+#  Secrets come from .env. Nothing secret is written here: this file is
+#  committed.
+# ══════════════════════════════════════════════════════════════════════════
+name: acme
+
+services:
+  # ───────────────────────── Traefik (edge) ─────────────────────────
+  traefik:
+    image: traefik:v2.11
+    container_name: acme_traefik
+    restart: always
+    command:
+      - --log.level=INFO
+      - --providers.docker=true
+      - --providers.docker.exposedbydefault=false
+      - --entrypoints.web.address=:80
+      - --entrypoints.websecure.address=:443
+      # Everything is HTTPS: the session cookie is Secure, so plain HTTP would
+      # silently drop it rather than merely be unencrypted.
+      - --entrypoints.web.http.redirections.entrypoint.to=websecure
+      - --entrypoints.web.http.redirections.entrypoint.scheme=https
+      - --certificatesresolvers.le.acme.tlschallenge=true
+      - --certificatesresolvers.le.acme.email=${ACME_EMAIL}
+      - --certificatesresolvers.le.acme.storage=/letsencrypt/acme.json
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - letsencrypt:/letsencrypt
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    labels:
+      - traefik.enable=true
+      # Reusable middlewares. HSTS matters here: the session cookie is the
+      # whole authentication story, and a downgrade would expose it.
+      - traefik.http.middlewares.security.headers.stsSeconds=31536000
+      - traefik.http.middlewares.security.headers.stsIncludeSubdomains=true
+      - traefik.http.middlewares.security.headers.frameDeny=true
+      - traefik.http.middlewares.security.headers.contentTypeNosniff=true
+      - traefik.http.middlewares.security.headers.browserXssFilter=true
+      - traefik.http.middlewares.security.headers.referrerPolicy=strict-origin-when-cross-origin
+      - traefik.http.middlewares.gzip.compress=true
+    networks:
+      - edge
+
+  # ───────────────────────── API ─────────────────────────
+  api:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+    image: acme_api:latest
+    container_name: acme_api
+    restart: always
+    expose:
+      - "3000"
+    environment:
+      # Fixed by the shape of the deployment rather than by an operator's
+      # choice — so they are set here and NOT offered in .env.
+      NODE_ENV: production
+      PORT: 3000
+      COOKIE_SECURE: "true"
+      APP_URL: https://${APP_HOST}
+      CORS_ORIGIN: https://${APP_HOST}
+      # console and memory print mail instead of sending it, which on a
+      # deployed box means invites that never arrive.
+      MAIL_TRANSPORT: smtp
+      MYSQL_HOST: db
+      MYSQL_PORT: 3306
+      # Operator's, from .env
+      MYSQL_DATABASE: ${MYSQL_DATABASE}
+      MYSQL_USER: ${MYSQL_USER}
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD}
+      JWT_SECRET: ${JWT_SECRET}
+      COOKIE_DOMAIN: ${COOKIE_DOMAIN}
+      SMTP_HOST: ${SMTP_HOST}
+      SMTP_PORT: ${SMTP_PORT}
+      SMTP_SECURE: ${SMTP_SECURE}
+      SMTP_USER: ${SMTP_USER}
+      SMTP_PASSWORD: ${SMTP_PASSWORD}
+      MAIL_FROM_ADDRESS: ${MAIL_FROM_ADDRESS}
+      MAIL_FROM_NAME: ${MAIL_FROM_NAME}
+      SUPERADMIN_EMAIL: ${SUPERADMIN_EMAIL}
+      SUPERADMIN_PASSWORD: ${SUPERADMIN_PASSWORD}
+      SUPERADMIN_NAME: ${SUPERADMIN_NAME:-Acme}
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+      DB_LOGGING: ${DB_LOGGING:-false}
+    depends_on:
+      db:
+        condition: service_healthy
+    logging:
+      driver: json-file
+      options: { max-size: "10m", max-file: "10", compress: "true" }
+    labels:
+      - traefik.enable=true
+      - traefik.docker.network=acme_edge
+      - traefik.http.routers.api.rule=Host(`${API_HOST}`)
+      - traefik.http.routers.api.entrypoints=websecure
+      - traefik.http.routers.api.tls.certresolver=le
+      - traefik.http.routers.api.middlewares=security,gzip
+      - traefik.http.services.api.loadbalancer.server.port=3000
+    networks:
+      - edge
+      - internal
+
+  # ───────────────────────── Web ─────────────────────────
+  web:
+    build:
+      context: .
+      dockerfile: frontend/Dockerfile
+    image: acme_web:latest
+    container_name: acme_web
+    restart: always
+    expose:
+      - "3010"
+    environment:
+      PORT: 3010
+      HOST: 0.0.0.0
+      API_ORIGIN: http://api:3000
+    depends_on:
+      api:
+        condition: service_started
+    logging:
+      driver: json-file
+      options: { max-size: "10m", max-file: "10", compress: "true" }
+    labels:
+      - traefik.enable=true
+      - traefik.docker.network=acme_edge
+      - traefik.http.routers.web.rule=Host(`${APP_HOST}`)
+      - traefik.http.routers.web.entrypoints=websecure
+      - traefik.http.routers.web.tls.certresolver=le
+      - traefik.http.routers.web.middlewares=security,gzip
+      - traefik.http.services.web.loadbalancer.server.port=3010
+    networks:
+      - edge
+      - internal
+
+  # ───────────────────────── MySQL ─────────────────────────
+  db:
+    image: mysql:8.0
+    container_name: acme_db
+    restart: always
+    command: --character-set-server=utf8mb4 --collation-server=utf8mb4_unicode_ci
+    environment:
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD}
+      MYSQL_DATABASE: ${MYSQL_DATABASE}
+      MYSQL_USER: ${MYSQL_USER}
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD}
+    volumes:
+      - db_data:/var/lib/mysql
+    # Deliberately not published to the host. Reach it through a bastion or
+    # `docker compose exec`, not from the internet.
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "127.0.0.1", "-u", "${MYSQL_USER}", "-p${MYSQL_PASSWORD}"]
+      interval: 10s
+      timeout: 5s
+      retries: 15
+    networks:
+      - internal
+
+volumes:
+  db_data:
+  letsencrypt:
+
+networks:
+  edge:
+    name: acme_edge
+  internal:
+    name: acme_internal
+    # No route out and no route in: the database is reachable only by the
+    # services that need it.
+    internal: true

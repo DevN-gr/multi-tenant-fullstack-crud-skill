@@ -1,0 +1,7 @@
+{
+  "_comment": "A deployed environment on MySQL, like production, but noisier. It differs from production only in how much it says — never in what it permits. cookie_secure and the mail transport are inherited from default.json on purpose: a qa box is reachable by other people, and an environment that quietly relaxes its cookies because of its name is how a staging deployment becomes the weak one.",
+
+  "log_level": "debug",
+  "log_pretty": false,
+  "db_logging": false
+}

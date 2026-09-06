@@ -1,0 +1,55 @@
+#!/usr/bin/env node
+/* ══════════════════════════════════════════════════════════════════════════
+   Entry point.
+
+   The schema is applied and the database is reachable *before* the port is
+   opened. A server that accepts requests while its tables are still being
+   created answers the first few with confusing errors; refusing to listen
+   until it is ready turns that into a container that is plainly not up yet,
+   which is what an orchestrator's health check is for.
+   ═══════════════════════════════════════════════════════════════════════ */
+'use strict';
+
+const http = require('http');
+const c = require('../config-dir');
+const logger = require('../utils/logger');
+const db = require('../models');
+
+const PORT = Number(process.env.PORT) || 3000;
+
+/* Nothing should reach here — every route and middleware is wrapped, so a
+   rejection becomes a 500 the client can read. This is the backstop for the
+   one that is not: a rejection raised outside a request, from a timer or a
+   pool event, which Node would otherwise turn into a silent exit. */
+process.on('unhandledRejection', (err) => {
+  logger.error({ err }, 'Unhandled rejection');
+});
+
+(async () => {
+  await db.init();
+
+  if (c.get('demo.enabled')) require('../services/demo-reaper')(db).start();
+
+  const app = require('../app')(db);
+  const server = http.createServer(app);
+
+  server.listen(PORT, () => {
+    logger.info({ port: PORT, env: db.ENVIRONMENT }, 'Acme API listening');
+  });
+
+  /* Compose sends SIGTERM on `down`. Finishing in-flight requests and closing
+     the pool cleanly avoids a half-written transaction on every deploy. */
+  const shutdown = async (signal) => {
+    logger.info({ signal }, 'Shutting down');
+    server.close(async () => {
+      try { await db.close(); } catch (e) { /* already gone */ }
+      process.exit(0);
+    });
+    setTimeout(() => process.exit(1), 10000).unref();
+  };
+  process.on('SIGTERM', () => shutdown('SIGTERM'));
+  process.on('SIGINT', () => shutdown('SIGINT'));
+})().catch((err) => {
+  logger.error({ err }, 'Failed to start');
+  process.exit(1);
+});

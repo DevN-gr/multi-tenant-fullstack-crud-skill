@@ -1,0 +1,35 @@
+{
+  "_comment": "The mapping. A variable that is set in the environment and named nowhere here is a variable read by nobody — which is silent, because the code falls back to its default and says nothing. tools/check-env.js fails on every partial state.",
+
+  "log_level": "LOG_LEVEL",
+  "db_logging": { "__name": "DB_LOGGING", "__format": "json" },
+
+  "auth": {
+    "jwt_secret": "JWT_SECRET",
+    "cookie_domain": "COOKIE_DOMAIN",
+    "cookie_secure": { "__name": "COOKIE_SECURE", "__format": "json" }
+  },
+
+  "mail": {
+    "transport": "MAIL_TRANSPORT",
+    "from_address": "MAIL_FROM_ADDRESS",
+    "from_name": "MAIL_FROM_NAME",
+    "app_url": "APP_URL",
+    "smtp": {
+      "host": "SMTP_HOST",
+      "port": { "__name": "SMTP_PORT", "__format": "json" },
+      "secure": { "__name": "SMTP_SECURE", "__format": "json" },
+      "user": "SMTP_USER",
+      "password": "SMTP_PASSWORD"
+    }
+  },
+
+  "superadmin": {
+    "email": "SUPERADMIN_EMAIL",
+    "password": "SUPERADMIN_PASSWORD",
+    "name": "SUPERADMIN_NAME"
+  },
+
+  "_cors_comment": "A comma-separated list. The session runs with credentials:true, which forbids a wildcard — every origin must be named exactly.",
+  "cors_origins": "CORS_ORIGIN"
+}
