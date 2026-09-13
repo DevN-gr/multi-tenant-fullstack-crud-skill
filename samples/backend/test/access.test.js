@@ -226,3 +226,51 @@ describe('the framework\'s own guarantees', () => {
     assert.equal(res.body.error, 'csrf');
   });
 });
+
+/* ══════════════════════════════════════════════════════════════════════════
+   Signing out is an access boundary, not a UI gesture: what matters is that
+   the session it ends grants nothing afterwards. The endpoint existed long
+   before anything called it, which is exactly how it goes untested.
+   ═══════════════════════════════════════════════════════════════════════ */
+describe('signing out', () => {
+  test('the session it ends reads nothing afterwards', async () => {
+    const client = await as(ctx.admin);
+    assert.equal((await client.get('/v1/api/customers')).status, 200,
+      'the session should work before it is ended');
+
+    assert.equal((await client.post('/v1/api/auth/logout')).status, 200);
+
+    /* The same cookie jar, carrying whatever logout left in it. */
+    assert.equal((await client.get('/v1/api/customers')).status, 401);
+    assert.equal((await client.get('/v1/api/auth/me')).status, 401);
+  });
+
+  test('the refresh token is spent, so the silent retry cannot revive it', async () => {
+    const client = await as(ctx.admin);
+    /* The access token lasts thirty minutes and the client refreshes once,
+       silently, whenever it meets a 401. If logout only cleared the cookies
+       the very next click would quietly sign the user back in. */
+    await client.post('/v1/api/auth/logout');
+    assert.equal((await client.post('/v1/api/auth/refresh')).status, 401);
+  });
+
+  test('it spends every refresh token for that user, not only this one', async () => {
+    const first = await as(ctx.agent);
+    const second = await as(ctx.agent);
+
+    await first.post('/v1/api/auth/logout');
+
+    /* The deliberate choice, and the one worth knowing about: logout marks
+       every unused refresh token for the user, so the tab left open on
+       another machine cannot renew itself either. */
+    assert.equal((await second.post('/v1/api/auth/refresh')).status, 401);
+
+    /* What it does NOT do is revoke the access token that session already
+       holds — that would need a token version or a deny list, and this
+       design has neither. So the other session keeps reading for the rest of
+       its thirty minutes and ends at its next refresh. Asserted because it
+       is a real window, and a reader who assumes otherwise is wrong about
+       something that matters. */
+    assert.equal((await second.get('/v1/api/customers')).status, 200);
+  });
+});

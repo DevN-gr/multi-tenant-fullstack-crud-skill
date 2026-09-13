@@ -407,7 +407,7 @@ docker compose up -d --build          # the whole stack
 docker compose -f docker-compose.dev.yml up --build   # local, on MySQL
 ```
 
-- **`api`** — `node:20-bookworm-slim`, dependencies installed with
+- **`api`** — `node:22-bookworm-slim`, dependencies installed with
   `npm ci --omit=dev` before the source is copied so a source change does not
   reinstall them. `--omit=dev` also leaves out `sqlite3`: production is MySQL,
   and **production cannot run on SQLite by construction**. Runs as a non-root
@@ -562,13 +562,17 @@ executes it, and this one `git reset`s the tree it would be living in.
 
 ### What bites
 
-1. **Pinning CI to the Dockerfile's Node version breaks the backend suite.**
-   `backend/package.json` runs `node --test 'test/**/*.test.js'`, and Node's
-   own glob expansion landed in **Node 21**; both Dockerfiles are `node:20`.
-   On 20 that command answers `Could not find 'test/**/*.test.js'` and exits 1.
-   Pin CI to the version the suite is developed on — `node -v` — and say that
-   the skew exists: Node 20 left maintenance in April 2026, so the containers
-   are worth moving too, as a separate change with its own deploy.
+1. **Pin CI to the version the suite is developed on, not the one the
+   container serves — and check both.** `backend/package.json` runs
+   `node --test 'test/**/*.test.js'`, and Node's own glob expansion landed in
+   **Node 21**: on `node:20` that exact command answers
+   `Could not find 'test/**/*.test.js'` and exits 1. This stack is why the
+   check is here — the images ran `node:20` while the suite needed 21, so
+   pinning CI to the Dockerfile "for consistency" was precisely the wrong
+   instinct. The images are on `node:22` now and the two agree, which is the
+   state to keep them in: read `node -v` **and** every `FROM` line before
+   writing the workflow, and when they have drifted, pin CI to the suite and
+   move the image separately, in its own change with its own deploy.
 2. **A suite that arranges its own configuration breaks when you help it.**
    `config/test.json` gives the suites a silent logger, bcrypt at 4 rounds and
    the in-memory mail transport, and `custom-environment-variables.json` maps

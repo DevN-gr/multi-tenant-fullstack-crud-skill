@@ -115,6 +115,7 @@ window.App = (function () {
     var route = ROUTES[r.name];
     if (route.cap && !Store.can(route.cap)) {
       root.innerHTML = shell(r.name, '<div class="empty">You do not have access to this screen.</div>');
+      mountShell(root);
       painted();
       return Promise.resolve();
     }
@@ -122,6 +123,7 @@ window.App = (function () {
     var view = Views[route.view];
     currentView = view;
     root.innerHTML = shell(r.name, '<div class="skeleton" aria-busy="true"></div>');
+    mountShell(root);
 
     var loading = view.load ? Promise.resolve(view.load(r)) : Promise.resolve(null);
 
@@ -131,15 +133,18 @@ window.App = (function () {
       try { html = view.render(r, data); }
       catch (err) {
         root.innerHTML = shell(r.name, '<div class="empty">This screen could not be drawn.</div>');
+        mountShell(root);
         painted();
         throw err;
       }
       root.innerHTML = shell(r.name, html);
+      mountShell(root);
       if (view.mount) view.mount(root, data);
       painted();
     }, function () {
       if (token !== renderToken) return;
       root.innerHTML = shell(r.name, '<div class="empty">Could not load this screen.</div>');
+      mountShell(root);
       painted();
     });
   }
@@ -150,7 +155,47 @@ window.App = (function () {
       return '<a href="#/' + name + '"' + (name === active ? ' class="on"' : '') + '>' +
         U.esc(name) + '</a>';
     }).join('');
-    return '<nav class="side">' + items + '</nav><main class="main">' + body + '</main>';
+    return '<nav class="side">' + items +
+      /* Not capability-gated: leaving is not a permission. Every principal
+         that can be signed in can sign out, including the platform account,
+         which holds no tenant capability at all. */
+      '<button class="signout" type="button" data-action="sign-out">Sign out</button>' +
+      '</nav><main class="main">' + body + '</main>';
+  }
+
+  /**
+   * The shell's own behaviour, attached wherever the shell is painted —
+   * including over the skeleton, because the nav is on screen for as long as
+   * a slow screen takes to load and a control somebody can see has to work.
+   */
+  function mountShell(root) {
+    var out = U.el('[data-action="sign-out"]', root);
+    if (!out) return;
+    out.addEventListener('click', function (ev) {
+      ev.preventDefault();
+      signOut();
+    });
+  }
+
+  /**
+   * Sign out.
+   *
+   * The same ending as a session that expired, so it ends the same way the
+   * `unauthorized` handler below does: the hash says where we are and a
+   * render paints it. `Store.logout` has already refused to forget anything
+   * if the server did not answer, so a failure here leaves the user signed
+   * in and says so, rather than pretending.
+   */
+  function signOut() {
+    return Store.logout().then(function (res) {
+      if (!res || res.ok === false) {
+        toast(errorText(res && res.error), 'error');
+        return res;
+      }
+      toast('Signed out.', 'ok');
+      location.hash = '#/login';
+      return render();
+    });
   }
 
   /**

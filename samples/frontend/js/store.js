@@ -104,6 +104,33 @@ window.Store = (function () {
   }
 
   /**
+   * End the session — on the server first, and only then here.
+   *
+   * The session cookie is httpOnly, so this side cannot drop it: the server
+   * is the only thing that can, and /auth/logout is also what marks the
+   * refresh tokens used, which is what stops a stolen one being worth
+   * anything afterwards. So nothing is forgotten until it answers. Clearing
+   * locally on a failed request would show somebody a sign-in form while
+   * their session was still live — a lie, and on a shared machine an
+   * expensive one.
+   *
+   * What is forgotten is everything loaded under that principal: the
+   * capabilities, the reference data and the slice. A logout that keeps the
+   * slice leaves one user's customers on screen while the next one signs in.
+   */
+  function logout() {
+    return API.post('/auth/logout').then(function (res) {
+      if (!res.ok) return res;
+      me = null;
+      caps = [];
+      ref = emptyRef();
+      slice = emptySlice();
+      emit();
+      return res;
+    });
+  }
+
+  /**
    * Fetch the slice one screen needs. A plain `load` builds a FRESH slice and
    * fills only what it asked for — which is why a write that re-reads what it
    * changed must use `loadMore`, or refreshing one collection discards every
@@ -194,7 +221,7 @@ window.Store = (function () {
   }
 
   return {
-    boot: boot, load: load, loadMore: loadMore, subscribe: subscribe,
+    boot: boot, logout: logout, load: load, loadMore: loadMore, subscribe: subscribe,
     currentUser: currentUser, can: can,
     workspaces: workspaces, users: users, customers: customers, tasks: tasks,
     userName: userName, workspaceName: workspaceName,

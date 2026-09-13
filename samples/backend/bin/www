@@ -11,7 +11,6 @@
 'use strict';
 
 const http = require('http');
-const c = require('../config-dir');
 const logger = require('../utils/logger');
 const db = require('../models');
 
@@ -27,8 +26,6 @@ process.on('unhandledRejection', (err) => {
 
 (async () => {
   await db.init();
-
-  if (c.get('demo.enabled')) require('../services/demo-reaper')(db).start();
 
   const app = require('../app')(db);
   const server = http.createServer(app);

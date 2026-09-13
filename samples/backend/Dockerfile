@@ -9,7 +9,7 @@
 #  the browser loads. Copying them rather than duplicating them is what keeps
 #  one implementation of the invariants.
 # ══════════════════════════════════════════════════════════════════════════
-FROM node:20-bookworm-slim
+FROM node:22-bookworm-slim
 
 WORKDIR /app
 

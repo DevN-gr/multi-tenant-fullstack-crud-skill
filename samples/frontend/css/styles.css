@@ -61,6 +61,13 @@ body {
 .side { border-inline-end: 1px solid var(--border); padding: var(--s-2); display: grid; gap: var(--s-1); align-content: start; }
 .side a { color: var(--text-2); text-decoration: none; padding: var(--s-1); border-radius: var(--r-1); }
 .side a.on { background: var(--surface); color: var(--text); }
+/* A button, because it performs an action rather than going somewhere — but
+   it sits in the same column as the links, so it is dressed as one. All the
+   colours are variables, which is what keeps it right in the dark theme. */
+.side .signout { font: inherit; text-align: start; cursor: pointer; appearance: none;
+  color: var(--text-2); background: none; border: 0; padding: var(--s-1);
+  border-radius: var(--r-1); margin-block-start: var(--s-2); }
+.side .signout:hover { background: var(--surface); color: var(--text); }
 .main { padding: var(--s-3); }
 
 .page-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: var(--s-2); }
@@ -88,4 +95,11 @@ body {
 @media (max-width: 720px) {
   .app-root { grid-template-columns: 1fr; }
   .side { display: flex; overflow-x: auto; border-inline-end: 0; border-block-end: 1px solid var(--border); }
+  /* The column becomes a row here, so the gap that separates it from the
+     links above becomes a gap that pushes it along the line. It sits with
+     the links instead, which is where a row wants it — and aligned to the
+     start, because a stretched <button> centres its label vertically while
+     the <a>s beside it do not, which reads as a control that has come
+     loose from the row. */
+  .side .signout { margin-block-start: 0; flex: none; align-self: start; }
 }

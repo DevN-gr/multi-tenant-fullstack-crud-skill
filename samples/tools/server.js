@@ -259,7 +259,14 @@ function start(port = 5173) {
     if (req.url.startsWith(API_PREFIX)) return proxy(req, res);
 
     let rel = decodeURIComponent(req.url.split('?')[0]);
-    if (rel === '/') rel = '/index.html';
+    /* The shell is app.html — there is no index.html — and this mapping is
+       the ONLY thing serving the bare URL. It is load-bearing twice over:
+       both containers' HEALTHCHECK fetches `/` and expects 200, so pointing
+       this at a file that does not exist leaves a container that serves
+       every real request correctly and is still reported unhealthy for
+       ever — which a deploy that waits on health reads as a failed release
+       and rolls back. */
+    if (rel === '/') rel = '/app.html';
 
     /* Keep every request inside the directory its mount points at, and
        inside what that mount is willing to serve.

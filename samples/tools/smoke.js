@@ -68,6 +68,21 @@ const PW = 'smoke-test-password';
   const { start } = require('./server');
   const { server, url } = await start(5199);
 
+  /* The bare URL, before Chrome opens.
+
+     Nothing else in this file asks for `/` — every goto below names
+     app.html — and `/` is precisely what both containers' HEALTHCHECK
+     fetches. It was once mapped to an index.html this app does not have, so
+     it answered 404 while every real request kept working: a web container
+     reported unhealthy for ever, and a deploy that waits on health reading
+     that as a failed release and rolling back. */
+  const rootStatus = await new Promise((done) => {
+    http.get(`${url}/`, (r) => { r.resume(); done(r.statusCode); })
+        .on('error', () => done(0));
+  });
+  check('GET / serves the shell — the URL the healthcheck probes',
+        rootStatus === 200, `status ${rootStatus}`);
+
   /* ── Chrome ───────────────────────────────────────────────────────── */
 
   const browser = await puppeteer.launch({ args: ['--no-sandbox'] });
@@ -85,8 +100,9 @@ const PW = 'smoke-test-password';
   /** Forgive exactly the noise one deliberate failure produces, and nothing
       else. Do not widen this. */
   async function expectingFailure(fn) {
+    const earlier = noise.slice();   // anything already wrong stays wrong
     forgiving = true;
-    try { return await fn(); } finally { forgiving = false; noise = []; }
+    try { return await fn(); } finally { forgiving = false; noise = earlier; }
   }
 
   /**
@@ -105,8 +121,58 @@ const PW = 'smoke-test-password';
   const seq = () => page.evaluate(() =>
     Number(document.documentElement.getAttribute('data-render-seq') || 0));
 
-  async function signIn(email) {
+  /**
+   * Go to a route and wait for the paint it causes — if it causes one.
+   *
+   * Assigning the hash the browser is ALREADY on fires no hashchange, so
+   * nothing re-renders and there is no paint to wait for. Waiting anyway
+   * hangs until the timeout, and the screen it was waiting for is on the
+   * display the whole time. Every role hits this on its first route:
+   * signing in has already landed there.
+   */
+  async function goToRoute(route) {
+    const before = await seq();
+    const moved = await page.evaluate((r) => {
+      const target = '#/' + r;
+      if (location.hash === target) return false;
+      location.hash = target;
+      return true;
+    }, route);
+    if (moved) await settledAfter(before);
+  }
+
+  /**
+   * The sign-in screen, with nothing behind it, whatever came before.
+   *
+   * Two things have to be undone, and neither is visible on its own:
+   *
+   *   • the session cookie, which outlives a navigation. Still set, the app
+   *     renders the previous role's screens and there is no form to fill in.
+   *   • the document — because /app.html#/login from /app.html#/audit is a
+   *     SAME-DOCUMENT navigation. Nothing reloads, so the previous role's
+   *     Store is still in memory with the previous role's user in it, and
+   *     the app draws that user over a session that no longer exists.
+   *
+   * There IS a sign-out control, and it is clicked in its own step below —
+   * but this reset has to work from any state, including the first call,
+   * when nobody is signed in and there is no nav to click. So it does what
+   * no control can: it arrives as a stranger.
+   */
+  async function openSignIn() {
+    const cdp = await page.createCDPSession();
+    await cdp.send('Network.clearBrowserCookies');
+    await cdp.detach();
+    await page.goto('about:blank');
     await page.goto(`${url}/app.html#/login`, { waitUntil: 'networkidle0' });
+  }
+
+  async function signIn(email) {
+    /* An anonymous tab boots by asking whether it has a session: /auth/me
+       answers 401, the one silent retry asks /auth/refresh and that answers
+       401 too, and Chrome logs both as console errors. That is the correct
+       answer to "am I signed in?" when nobody is, so it is forgiven here —
+       and only here. */
+    await expectingFailure(() => openSignIn());
     await page.type('input[name=email]', email);
     await page.type('input[name=password]', PW);
     const before = await seq();
@@ -128,9 +194,7 @@ const PW = 'smoke-test-password';
     await signIn(who.email);
 
     for (const route of routes) {
-      const before = await seq();
-      await page.evaluate((r) => { location.hash = '#/' + r; }, route);
-      await settledAfter(before);
+      await goToRoute(route);
 
       const text = await page.evaluate(() => document.body.innerText);
       /* Not a formatting rule. Each of these is a key missing from a Store
@@ -145,8 +209,7 @@ const PW = 'smoke-test-password';
 
   console.log('\nforms');
   await signIn(seeded.admin.email);
-  await page.evaluate(() => { location.hash = '#/customers'; });
-  await settledAfter(await seq());
+  await goToRoute('customers');
 
   await page.click('[data-action="new-customer"]');
   await page.waitForSelector('#f');
@@ -158,9 +221,32 @@ const PW = 'smoke-test-password';
   const created = await db.Customer.count({ where: { name: 'Driven Ltd' } });
   check('the new-customer dialog actually created a row', created === 1);
 
+  /* ── Signing out is a control, so it is clicked ───────────────────── */
+
+  console.log('\nsign-out');
+  await signIn(seeded.admin.email);
+  await goToRoute('customers');
+
+  const outSeq = await seq();
+  await page.click('[data-action="sign-out"]');
+  await settledAfter(outSeq);
+  check('signing out puts the sign-in form back',
+        (await page.$('input[name=email]')) !== null);
+
+  /* The session cookie is httpOnly, so nothing in the page could have
+     dropped it — only /auth/logout can. A reload that still lands on the
+     form is the proof that the server did, and not merely that the app
+     stopped drawing the nav. The anonymous boot it provokes is the same
+     expected pair of 401s that signing in provokes. */
+  await expectingFailure(async () => {
+    await page.reload({ waitUntil: 'networkidle0' });
+  });
+  check('the session did not survive the reload',
+        (await page.$('input[name=email]')) !== null);
+
   /* A deliberate failure, forgiven precisely. */
   await expectingFailure(async () => {
-    await page.goto(`${url}/app.html#/login`, { waitUntil: 'networkidle0' });
+    await openSignIn();
     await page.type('input[name=email]', seeded.admin.email);
     await page.type('input[name=password]', 'wrong-password');
     await page.click('button[type=submit]');

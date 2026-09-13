@@ -166,7 +166,7 @@ works, because the server-side script is not versioned by the run.
 
 | Symptom | Cause |
 |---|---|
-| `Could not find 'test/**/*.test.js'`, exit 1 | CI pinned to Node 20. The suite needs Node's own glob expansion, which landed in 21. |
+| `Could not find 'test/**/*.test.js'`, exit 1 | CI pinned below Node 21. The suite needs Node's own glob expansion, which landed in 21 — check `node-version` in the workflow. |
 | `git@github.com: Permission denied (publickey)`, exit 128 | Step 2 not done, or done in `~/.ssh/config` instead of `core.sshCommand`. |
 | `Host key verification failed` | `DEPLOY_KNOWN_HOSTS` does not match `DEPLOY_HOST` exactly — a bare hostname against an FQDN, or a missing `[host]:port`. |
 | `refusing '…' — this key deploys a commit and does nothing else` | Something other than a 40-character SHA reached the script. Expected, if you SSH in with that key by hand. |

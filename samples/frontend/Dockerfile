@@ -18,7 +18,7 @@
 #  every request. Serving them from two origins is possible and costs you
 #  CORS, a named origin list, and a third-party-cookie policy to fall foul of.
 # ══════════════════════════════════════════════════════════════════════════
-FROM node:20-bookworm-slim
+FROM node:22-bookworm-slim
 
 WORKDIR /app
 

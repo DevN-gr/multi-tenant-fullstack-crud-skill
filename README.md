@@ -365,7 +365,7 @@ The database is kept on an internal network and is not published to the host.
 
 The API image:
 
-* uses Node 20,
+* uses Node 22,
 * installs production dependencies only,
 * runs as a non-root user,
 * writes nothing to disk,

@@ -38,17 +38,21 @@ jobs:
 
       - uses: actions/setup-node@v4
         with:
-          # The version the SUITE runs on, NOT the version backend/Dockerfile
-          # serves. backend/package.json runs
-          #     node --test 'test/**/*.test.js'
-          # and Node's own glob expansion landed in Node 21: on node:20 that
-          # exact command answers "Could not find 'test/**/*.test.js'" and
-          # exits 1. Pinning CI to the container's runtime to be consistent is
-          # the most likely way a first CI run fails.
+          # The version the SUITE runs on. It happens to match what the
+          # Dockerfiles serve — both are node:22 — and that is a state to
+          # maintain deliberately, not an invariant to rely on.
           #
-          # The skew is worth fixing rather than tolerating — Node 20 left
-          # maintenance in April 2026 — but it is a separate change, in the
-          # Dockerfiles, with its own deploy.
+          # They were not always the same. The images ran node:20 while
+          # backend/package.json ran
+          #     node --test 'test/**/*.test.js'
+          # and Node's own glob expansion landed in Node 21, so on node:20
+          # that exact command answers "Could not find 'test/**/*.test.js'"
+          # and exits 1. Pinning this line to the container's runtime for
+          # consistency is the most likely way a first CI run fails.
+          #
+          # So if the images ever move again: this line follows `node -v` and
+          # the suite, and the image moves in its own change with its own
+          # deploy.
           node-version: 22
           cache: npm
           cache-dependency-path: |
