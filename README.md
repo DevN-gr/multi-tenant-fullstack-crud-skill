@@ -375,13 +375,33 @@ Traefik provides TLS, HTTPS redirection and reusable security-related HTTP middl
 
 ## Install
 
-### Claude Code: every project
+### Quick install
+
+```bash
+npx skills add DevN-gr/multi-tenant-fullstack-crud-skill
+```
+
+That installs the skill into `.claude/skills/` for the current project. Add `-g` to install into `~/.claude/skills/` and make it available everywhere.
+
+The [`skills` CLI](https://github.com/vercel-labs/skills) supports Claude Code, Codex, Cursor, OpenCode and seventy other agents, so a specific target can be named:
+
+```bash
+npx skills add DevN-gr/multi-tenant-fullstack-crud-skill -g -a claude-code -y
+```
+
+Later, pull changes with:
+
+```bash
+npx skills update crud-stack
+```
+
+### Git clone: every project
 
 ```bash
 git clone https://github.com/DevN-gr/multi-tenant-fullstack-crud-skill.git ~/.claude/skills/crud-stack
 ```
 
-### Claude Code: one project
+### Git clone: one project
 
 ```bash
 git clone https://github.com/DevN-gr/multi-tenant-fullstack-crud-skill.git .claude/skills/crud-stack
