@@ -93,13 +93,15 @@ body {
 
 /* One column below the phone breakpoint. Check every screen at 390px. */
 @media (max-width: 720px) {
-  .app-root { grid-template-columns: 1fr; }
+  /* One column means the nav and the main area stop being two columns and
+     become two ROWS — and both of them are auto, so the `min-height: 100vh`
+     above has spare height to hand out and splits it between them equally.
+     The nav ends up a third of the phone screen tall with four links in the
+     top corner of it. Size it to its content and let the screen have the
+     rest. */
+  .app-root { grid-template-columns: 1fr; grid-template-rows: auto 1fr; }
   .side { display: flex; overflow-x: auto; border-inline-end: 0; border-block-end: 1px solid var(--border); }
-  /* The column becomes a row here, so the gap that separates it from the
-     links above becomes a gap that pushes it along the line. It sits with
-     the links instead, which is where a row wants it — and aligned to the
-     start, because a stretched <button> centres its label vertically while
-     the <a>s beside it do not, which reads as a control that has come
-     loose from the row. */
-  .side .signout { margin-block-start: 0; flex: none; align-self: start; }
+  /* The column becomes a row here, so the gap that separated it from the
+     links above would push it along the line instead. It sits with them. */
+  .side .signout { margin-block-start: 0; flex: none; }
 }
