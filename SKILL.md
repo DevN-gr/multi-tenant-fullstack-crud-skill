@@ -1,6 +1,6 @@
 ---
 name: crud-stack
-description: Build or extend a multi-tenant, role-scoped, audited web app on a generic-CRUD architecture — Express + Sequelize behind one crudThat factory with per-model controller hooks, a no-build-step vanilla JS frontend, a shared rules module both sides run, and a three-container Docker/Traefik/MySQL deployment. Use when starting a new project of this shape, or when adding a model, controller, route, view, test or environment variable to one. Covers the CRUD factory and its hooks, the access model, project layout, the three test suites, and the deployment.
+description: Build or extend a multi-tenant, role-scoped, audited web app on a generic-CRUD architecture — Express + Sequelize behind one crudThat factory with per-model controller hooks, a no-build-step vanilla JS frontend, a shared rules module both sides run, and a three-container Docker/Traefik/MySQL deployment. Use when starting a new project of this shape, or when adding a model, controller, route, view, test or environment variable to one. Covers the CRUD factory and its hooks, the access model, project layout, the three test suites, and the deployment. Also covers going live: at a first deployment, a question about how to deploy or make the app publicly accessible, or an MVP about to be used, it offers push-to-main automatic deployment — GitHub Actions running the suites, then SSH to a VPS that rebuilds with Docker Compose and rolls back on a failed healthcheck.
 license: MIT
 metadata:
   version: 1.0.0
@@ -31,6 +31,8 @@ backend/      the API: Express + Sequelize, MySQL in production, SQLite locally
 tools/        static server + API proxy, smoke test, checks
 tests/        the frontend unit suite
 docs/         the user manual and its screenshots
+ops/          the VPS half of push-to-main: the deploy script, its test
+              harness, and the runbook for whoever has shell on the box
 ```
 
 Three containers: `web` (static files + proxy), `api`, `db`. The web container
@@ -310,6 +312,9 @@ npm run verify            # all of the above
 - Framework behaviour → `backend/test/crud.api.test.js`, against an isolated
   model with no app boot, auth or seeds.
 - Anything that needs rendering → `tools/smoke.js`.
+- The deploy script → `ops/test-deploy.sh`, which needs neither Docker nor a
+  VPS: a real git repository in a temporary directory and a stubbed `docker`
+  on `PATH`.
 
 **A denial is asserted as an empty result, not a status code.** A test that
 accepts a `403` lets through the regression that turns the endpoint into an
@@ -430,6 +435,256 @@ cleanly, so a deploy does not leave a half-written transaction.
 
 ---
 
+## Automatic deployment
+
+`samples/.github/workflows/deploy.yml` and `samples/ops/` are a push-to-main
+pipeline for this stack: the suites run on a GitHub-hosted runner and, only if
+they pass, one SSH connection tells the VPS to rebuild at the commit that was
+verified.
+
+### When to offer it — and what to ask first
+
+Three moments, and at each one **ask rather than build**. How a product ships
+is the operator's decision, not a detail to be tidied up on their behalf:
+
+- they are deploying for the first time;
+- they ask how to deploy, how to put it on a domain, or how to make it
+  publicly accessible;
+- the app reaches an MVP somebody is about to start using.
+
+Two questions before writing any of it:
+
+1. **"Do you want a push to `main` to deploy itself — the suites on a runner
+   first, and the VPS only if they pass?"** If the answer is no, the answer is
+   no; `docker compose up -d --build` by hand is a legitimate way to run a
+   small product.
+2. **"Does this VPS run only this app, or other things as well?"** Assume
+   *other things* until told otherwise, because everything you put on that box
+   has to be named for the project if so: `acme-deploy.sh` and
+   `.acme-deploy.lock`, never `deploy.sh` and `.deploy.lock`. Two projects
+   sharing one lock file is a collision that shows up as one project's deploy
+   mysteriously waiting on another's, months later. The same answer decides
+   whether Traefik is yours to restart (it is not, if it fronts anything else),
+   whether `docker image prune` is safe box-wide, and whether a
+   `Host github.com` block in `~/.ssh/config` would break somebody else's pull.
+
+**Say what the gate costs before building it.** Public repositories get Actions
+minutes free; private ones get 2,000 a month on Free and 3,000 on Pro, then
+about $0.008 a minute on Linux:
+
+```bash
+curl -s -o /dev/null -w '%{http_code}\n' https://api.github.com/repos/OWNER/REPO   # 200 public, 404 private
+```
+
+This stack's gate is roughly four to six minutes a run — two `npm ci`s, three
+suites and a real Chrome. Multiply by how often they actually merge, say the
+number, and let them decide. Revisit it against **Settings → Billing** after a
+week rather than the estimate.
+
+### Find these out before writing the workflow
+
+Read the repository for what it can answer; ask for the rest. Every one of
+these has a wrong default that fails on the first run:
+
+1. **The command they deploy with today, verbatim.** It encodes the directory,
+   the compose file and which services get rebuilt.
+2. **Which compose file the VPS actually uses.** A repository carries several
+   (`docker-compose.yml`, `.dev.yml`); the one that matters is the one in the
+   deploy directory, which may `include:` a file from the checkout. And note
+   that **compose service names and container names are different things** —
+   this stack's services are `api` and `web`, its containers `acme_api` and
+   `acme_web`. `docker compose up` takes the first, `docker inspect` the
+   second, and on a shared box `docker inspect api` can answer about somebody
+   else's container.
+3. **The project's own definition of done.** Here it is `npm run verify`, so
+   the CI steps are its parts — split into one named step each, so a red run
+   names the suite instead of saying "verify".
+4. **The runtime, from `node -v` *and* from `FROM` in every Dockerfile.** They
+   differ in this stack, and that difference is the single most likely way a
+   first run fails. See below.
+5. **Whether the suites want environment variables — or break on them.**
+6. **The `HEALTHCHECK` directives.** Both Dockerfiles have one; reuse them as
+   the post-deploy gate rather than writing a second probe to be wrong.
+
+### Why the runner, and never the VPS
+
+The honest answer, because it will be asked: the tests do not run in Docker on
+either side, and the VPS already has Docker, so what is the runner *for*?
+
+- Not the running of the tests. It is the **clean checkout** — which catches
+  the file that was never `git add`ed, and that is the save that actually
+  happens — plus `npm ci` from the lockfile rather than months-old
+  `node_modules`, and the fact that it runs when somebody is in a hurry, which
+  is the whole difference from a local run that is optional.
+- **Never move the suites onto the production VPS, and never put a self-hosted
+  runner there.** It means Chrome and devDependencies installed next to
+  production data, suites competing with live traffic for CPU, and — fatally —
+  tests running *after* the code is on the box. A gate that fires
+  post-arrival is not a gate.
+- If minutes genuinely matter, the honest cheaper option is deploy-only CI
+  plus a local pre-push hook. Say that it is bypassable with `--no-verify` and
+  still runs against a dirty tree, and let them choose.
+
+### The two files
+
+**The workflow** (`samples/.github/workflows/deploy.yml`) runs on
+`push: branches: [main]` — a merge *is* a push — plus `workflow_dispatch` for a
+redeploy by hand. `concurrency: {group: production, cancel-in-progress: false}`
+so deploys queue rather than truncate: a half-applied `compose up` is worse
+than a slow one. The `deploy` job `needs: verify`, which is the only thing
+making any of it a gate, and runs exactly one command: `ssh user@host "<sha>"`.
+
+**The server script** (`samples/ops/acme-deploy.sh`) is pinned to the CI key as
+a forced command, and:
+
+- takes the commit from `SSH_ORIGINAL_COMMAND` and **refuses anything that is
+  not 40 lower-case hex characters**. That is what makes handing a private key
+  to GitHub defensible — the key deploys a commit and can do nothing else.
+- deploys **the SHA that was verified**, not `origin/main`: when a second merge
+  lands mid-build, `origin/main` is no longer what the suites passed against.
+- `flock`s, so two deploys cannot interleave over one checkout. The lock lives
+  in the deploy directory, **outside** the checkout, where `git reset` cannot
+  reach it.
+- `git fetch` + `git reset --hard <sha>`, never `git pull`. The checkout is a
+  deployment artefact, not a workspace: a pull that stops on a local edit stops
+  the deploy with it, and a merge commit made on the server exists nowhere
+  else.
+- waits on the containers' own healthchecks, then on failure resets to the
+  previous commit, rebuilds and exits non-zero — a bad push costs a slow
+  deploy, not an outage.
+- prunes dangling images older than a week. **Never `-a`**: that command is
+  box-wide, and on a shared VPS `-a` deletes every image without a running
+  container, including the one another app is about to restart from.
+
+Keep the repository copy as the reviewable source and `scp` it up. **Do not
+symlink the server's copy into the checkout** — bash reads a script as it
+executes it, and this one `git reset`s the tree it would be living in.
+
+### What bites
+
+1. **Pinning CI to the Dockerfile's Node version breaks the backend suite.**
+   `backend/package.json` runs `node --test 'test/**/*.test.js'`, and Node's
+   own glob expansion landed in **Node 21**; both Dockerfiles are `node:20`.
+   On 20 that command answers `Could not find 'test/**/*.test.js'` and exits 1.
+   Pin CI to the version the suite is developed on — `node -v` — and say that
+   the skew exists: Node 20 left maintenance in April 2026, so the containers
+   are worth moving too, as a separate change with its own deploy.
+2. **A suite that arranges its own configuration breaks when you help it.**
+   `config/test.json` gives the suites a silent logger, bcrypt at 4 rounds and
+   the in-memory mail transport, and `custom-environment-variables.json` maps
+   environment over config in *every* environment, `test` included. So an
+   `env:` block carrying `MAIL_TRANSPORT` or `LOG_LEVEL` into the verify job
+   overrides exactly what the assertions are written against. This stack's
+   suites need no secrets: they generate their own. Write no `env:` block.
+3. **The VPS can `git pull` by hand and cannot from CI.** The manual pull works
+   because an interactive session forwards an ssh-agent; a forced command has
+   none. Symptom: `Permission denied (publickey)`, exit 128. Fix: a read-only
+   **deploy key** on the VPS, pointed at **per repository** with
+   `git config core.sshCommand`, never a global `Host github.com` block in
+   `~/.ssh/config` — that box hosts other services. Test it the way CI will,
+   with the agent removed, because an interactive test passes and proves
+   nothing:
+
+   ```bash
+   env -u SSH_AUTH_SOCK git -C ~/deployment/acme fetch --prune origin && echo OK
+   ```
+
+4. **Re-running a failed run replays the same commit.** A fix to the *workflow*
+   therefore needs a new push — the workflow file is part of the commit being
+   re-run. Say this before they reach for the re-run button. A fix to the
+   *server* script is different: `scp` it up and the re-run works.
+5. **Generating the CI key and authorising it is one command chain, not two.**
+   Given separately, the second can be run alone against a `.pub` that is not
+   there, appending a line with a command and no key — after which every
+   connection, including theirs, is read against a broken `authorized_keys`.
+   Join them with `&&`, and give them the check and the undo:
+
+   ```bash
+   ssh-keygen -l -f ~/.ssh/authorized_keys        # one fingerprint per parseable line
+   sed -i '/,restrict *$/d' ~/.ssh/authorized_keys
+   ```
+
+6. **`known_hosts` must match the hostname the workflow dials, exactly.** Build
+   the line from the host's own key file rather than a keyscan — no network,
+   nothing to intercept — and strip keyscan's `#` banners if one is used:
+
+   ```bash
+   printf '%s %s\n' "$(hostname -f)" "$(cut -d' ' -f1,2 /etc/ssh/ssh_host_ed25519_key.pub)"
+   ```
+
+   A non-standard port takes the form `[host]:2222 ssh-ed25519 AAAA…`. A
+   rotated host key then fails the deploy closed, which is the feature.
+7. **An `environment: url:` built from an expression is silently skipped** —
+   "Skip setting environment url as environment 'production' may contain
+   secret". It is a leak guard. Hardcode the literal or drop the line.
+8. **In the script, prefer explicit `if` blocks to cleverness.** `set -e` with
+   `case` and `&&` chains is not worth the puzzle; call the rollback directly
+   rather than depending on an `ERR` trap firing from inside a loop, and
+   remember arithmetic `(( x >= y ))` returns 1 when false — safe inside `if`,
+   a landmine anywhere else. Install the rollback trap **after** the first
+   mutation: if `git fetch` fails, nothing has changed and there is nothing to
+   roll back.
+
+### Prove the script before anyone trusts it
+
+`samples/ops/test-deploy.sh` drives the real script with a **real git
+repository** (a bare upstream and a clone, so the fetch/reset/rollback logic is
+genuinely under test) and a **stubbed `docker`** on `PATH` whose answers come
+from environment variables. Adapt it with the script; it covers:
+
+| Path | Expected |
+|---|---|
+| a valid SHA | deploys, exit 0, checkout at that commit |
+| `bash -i`, `origin/main; rm -rf /`, `main`, a short or upper-case hex string | refused with a message, exit 1, checkout untouched |
+| no command at all | falls back to `origin/main` |
+| a container that comes up `unhealthy` | rolls back to the previous commit, exit 1 |
+| a commit that does not build | rolls back, and the rebuild of the good commit succeeds |
+| a container stuck in `starting` | times out, rolls back |
+| two deploys at once | the second waits on the lock instead of racing |
+
+Assert the refusal **message**, not merely a non-zero exit: most of those
+strings are not valid git revisions either, so a script with the guard deleted
+still fails — later, by accident, and for the wrong reason.
+
+### Handing the server side over
+
+These need a person with shell on the box, in this order, each with its check.
+`samples/ops/README.md` is that runbook, written to be handed over:
+
+1. `scp` the script up, `chmod +x`, and **run it by hand once** — it should
+   deploy and report healthy before any CI exists.
+2. The deploy key for GitHub, and `core.sshCommand`, verified with
+   `env -u SSH_AUTH_SOCK`.
+3. The CI key, generated and pinned to the forced command in one chain:
+
+   ```bash
+   ssh-keygen -t ed25519 -f /tmp/ci -N '' -C 'github-actions-deploy' && \
+   printf 'command="%s/deployment/acme-deploy.sh",restrict %s\n' "$HOME" "$(cat /tmp/ci.pub)" \
+     >> ~/.ssh/authorized_keys
+   ```
+
+   `restrict` removes pty, agent and port forwarding. Then `cat /tmp/ci` for
+   the secret and `shred -u /tmp/ci /tmp/ci.pub`.
+4. Repository secrets `DEPLOY_SSH_KEY` (the whole private key, headers
+   included), `DEPLOY_HOST`, `DEPLOY_USER`, `DEPLOY_KNOWN_HOSTS`; variable
+   `DEPLOY_PORT` if SSH is not on 22.
+5. Worth naming while they are in there: make `verify` a **required status
+   check** on pull requests, so a red suite cannot reach `main` at all.
+
+### After the first green run
+
+Say what is still open rather than implying it is finished. Usually:
+
+- suites the gate does **not** cover, and why;
+- the version skew between CI and the containers, or a runtime that is EOL;
+- `README.md` and the ops documentation, which do not yet mention auto-deploy,
+  the deploy key or the secrets — this architecture treats an operator-facing
+  change as one that is documented in the same change;
+- the real minute usage, from **Settings → Billing** after a week, so the cost
+  decision is made on a number rather than an estimate.
+
+---
+
 ## Language and localisation
 
 If the interface is not in English:
@@ -463,6 +718,8 @@ states, tooltips, `aria-label`s and dialog buttons.
       project layout, scope and limits
 - [ ] A setting added, renamed or removed → mapping, `.env.example` and the
       compose files updated together
+- [ ] A change to how it deploys → the workflow, `ops/<project>-deploy.sh` and
+      `ops/test-deploy.sh` move together, and `bash ops/test-deploy.sh` passes
 - [ ] Visible strings are in the product's language; code, comments and tests
       are English
 - [ ] Checked at 390px and desktop, in both themes

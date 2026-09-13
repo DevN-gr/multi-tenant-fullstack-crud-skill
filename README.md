@@ -38,6 +38,8 @@ Its annotated files document not just what the architecture does, but why partic
 
 * **Ships behavior with a regression test.** New behavior gets a test that fails before the change and passes afterward; a bug fix first reproduces the bug.
 
+* **Offers automatic deployment at the moment it becomes relevant, and asks first.** A first deployment, a question about making the app publicly accessible, or an MVP about to be used is when push-to-main CI is worth raising — as a question, together with whether the VPS hosts anything else, because that answer decides every name placed on that box.
+
 ## Architecture
 
 The stack is intentionally small:
@@ -373,6 +375,37 @@ The API image:
 
 Traefik provides TLS, HTTPS redirection and reusable security-related HTTP middleware.
 
+## Continuous deployment
+
+The skill also covers going live, and treats it as a decision rather than a default.
+
+When the user reaches a first deployment, asks how to deploy or how to make the application publicly accessible, or arrives at an MVP somebody is about to use, the agent **offers** a push-to-main pipeline instead of building one unasked — and asks whether the VPS hosts only this application or other services too, because that answer decides whether every artifact placed on that box needs a project-specific name.
+
+The included implementation is deliberately small:
+
+```text
+push to main
+   |
+   v
+GitHub-hosted runner        clean checkout, npm ci from the lockfile,
+   |                        then each suite as its own named step
+   v
+ssh user@vps "<commit sha>"
+   |
+   v
+forced command on the VPS   fetch, reset to the verified commit, rebuild,
+                            wait on the containers' own healthchecks,
+                            roll back to the previous commit on failure
+```
+
+The key GitHub holds is pinned to that one script and refuses any argument that is not a 40-character commit SHA, so a stolen CI key can deploy a commit that is already in the repository and do nothing else.
+
+The commit deployed is the one CI verified rather than `origin/main`, which is no longer the same thing once a second merge lands during a build.
+
+`samples/ops/test-deploy.sh` drives the deploy script through a good deploy, refused commands, an unhealthy container, a build failure, a start-up timeout and a lock contest, using a real git repository and a stubbed Docker, so the rollback path is proven before the day it is needed.
+
+`samples/ops/README.md` is the operator runbook for the steps only someone with shell on the VPS can perform.
+
 ## Install
 
 ### Quick install
@@ -473,6 +506,14 @@ samples/
 
   tests/
     frontend unit suite
+
+  ops/
+    VPS deploy script
+    its test harness
+    operator runbook
+
+  .github/workflows/
+    push-to-main pipeline
 ```
 
 The sample domain includes resources such as:
@@ -513,6 +554,8 @@ For example:
 > Add a searchable resource and make sure its default sorting is indexed.
 
 > Why is this list sorting slowly for the biggest tenant?
+
+> This is ready for its first real users — how do I put it on a domain?
 
 For a new application, the skill helps lay out the repository, reuse the framework pieces and implement the first domain-specific resources against your access model.
 

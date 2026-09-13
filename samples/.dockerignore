@@ -30,12 +30,14 @@ tools/smoke.js
 tools/check-*.js
 letsencrypt/
 ops/
+.github/
 
 # Documentation for developers rather than for the app
 AGENTS.md
 CLAUDE.md
 README.md
 .claude/
+.agents/
 docs/agents/
 
 # OS noise

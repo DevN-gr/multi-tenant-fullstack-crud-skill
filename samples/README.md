@@ -29,6 +29,8 @@ name:
 | `backend/test/http.js` | A cookie-jar client with a bounded timeout per request. |
 | `tools/server.js` | Static server + API proxy, so the app and the API are one origin. |
 | `frontend/js/api.js` | Errors as values, one silent 401 retry, CSRF echoed from a readable cookie. |
+| `ops/acme-deploy.sh` | The deploy half of push-to-main. Rename the file, the lock and the container names; the refusal, the rollback and the lock are the point. |
+| `ops/test-deploy.sh` | Drives that script through every path — including the rollback — with a real git repository and a stubbed `docker`. |
 
 ## What to rewrite for your domain
 
@@ -53,3 +55,11 @@ node tests/run-tests.js       # 29 assertions, no dependencies, no install
 It passes against these files unchanged, and it is the fastest way to see the
 load/render/route contract enforced. The backend suite and the smoke test need
 `npm install` in `backend/` and at the root respectively.
+
+The deploy script's own suite also runs as-is, and needs neither Docker nor a
+VPS — it builds a real git repository in a temporary directory and puts a stub
+`docker` on `PATH`:
+
+```bash
+bash ops/test-deploy.sh       # 23 assertions across seven scenarios
+```

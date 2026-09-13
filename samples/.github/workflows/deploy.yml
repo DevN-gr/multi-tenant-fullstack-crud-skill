@@ -1,0 +1,132 @@
+# ══════════════════════════════════════════════════════════════════════════
+#  Acme — push to main, run the gate, deploy if it is green.
+#
+#  The gate is `npm run verify` taken apart into one step per suite, so a red
+#  run names which suite failed on the summary page instead of saying
+#  "verify". Keep the two in step: a suite added to verify is added here.
+#
+#  What the runner buys, given the tests also run locally, is not the running
+#  of them. It is a CLEAN CHECKOUT — which catches the file that was never
+#  `git add`ed, and that is the save that actually happens — plus `npm ci`
+#  from the lockfile rather than months-old node_modules, and the fact that it
+#  runs when somebody is in a hurry, which is the whole difference from a
+#  local run that is optional.
+#
+#  None of this belongs on the VPS. A self-hosted runner there would put
+#  Chrome and devDependencies next to production data, make the suites compete
+#  with live traffic for CPU, and — fatally — run the tests AFTER the code had
+#  arrived on the box. A gate that fires post-arrival is not a gate.
+# ══════════════════════════════════════════════════════════════════════════
+name: Deploy
+
+on:
+  push:
+    branches: [main]        # a merge IS a push, so merged PRs are covered
+  workflow_dispatch:        # and a redeploy of main, by hand, from the UI
+
+concurrency:
+  group: production
+  cancel-in-progress: false   # deploys queue. A half-applied `compose up` is
+                              # worse than a slow one.
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          # The version the SUITE runs on, NOT the version backend/Dockerfile
+          # serves. backend/package.json runs
+          #     node --test 'test/**/*.test.js'
+          # and Node's own glob expansion landed in Node 21: on node:20 that
+          # exact command answers "Could not find 'test/**/*.test.js'" and
+          # exits 1. Pinning CI to the container's runtime to be consistent is
+          # the most likely way a first CI run fails.
+          #
+          # The skew is worth fixing rather than tolerating — Node 20 left
+          # maintenance in April 2026 — but it is a separate change, in the
+          # Dockerfiles, with its own deploy.
+          node-version: 22
+          cache: npm
+          cache-dependency-path: |
+            package-lock.json
+            backend/package-lock.json
+
+      # BEFORE npm ci: puppeteer downloads Chrome in a postinstall hook, so a
+      # cache restored afterwards is a cache restored after the download it
+      # was meant to save.
+      - name: Restore the Chrome puppeteer installs
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/puppeteer
+          key: puppeteer-${{ runner.os }}-${{ hashFiles('package-lock.json') }}
+
+      # `npm ci` needs a COMMITTED lockfile on both sides. The skill's samples/
+      # tree deliberately ships without one; your project must commit both, or
+      # every run fails here before it runs a single test.
+      - run: npm ci
+      - run: npm ci --prefix backend   # not --omit=dev: sqlite3 IS the test dialect
+
+      # No `env:` block, deliberately. backend/config/test.json arranges what
+      # the suites need — a silent logger, bcrypt at 4 rounds, the in-memory
+      # mail transport — and custom-environment-variables.json maps env over
+      # config in EVERY environment, test included. So a helpful
+      # MAIL_TRANSPORT: smtp here overrides the memory transport and breaks
+      # every invite assertion, and a LOG_LEVEL breaks the silence the
+      # assertions are read against. The suites need no secrets: they generate
+      # their own.
+      - name: Frontend suite
+        run: npm test
+
+      - name: Backend suite
+        run: npm run test:backend
+
+      # Runs the whole stack in-process — API on in-memory SQLite, the static
+      # server proxying to it, Chrome against that — so it needs no services:
+      # block and nothing from the deployment.
+      - name: Browser smoke
+        run: npm run smoke
+
+      - name: Environment-variable parity
+        run: npm run check
+
+  deploy:
+    needs: verify             # the only thing making this a gate
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    environment:
+      name: production
+      # A literal. Built from an expression — ${{ vars.APP_HOST }} — Actions
+      # silently skips it: "Skip setting environment url as environment
+      # 'production' may contain secret". It is a leak guard, not a bug.
+      url: https://app.example.com
+    steps:
+      - name: Authorise the runner
+        env:
+          DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+          DEPLOY_KNOWN_HOSTS: ${{ secrets.DEPLOY_KNOWN_HOSTS }}
+        run: |
+          install -m 700 -d ~/.ssh
+          printf '%s\n' "$DEPLOY_SSH_KEY"     > ~/.ssh/id_deploy
+          printf '%s\n' "$DEPLOY_KNOWN_HOSTS" > ~/.ssh/known_hosts
+          chmod 600 ~/.ssh/id_deploy ~/.ssh/known_hosts
+
+      # One command, and it is not a command: the key is pinned to a forced
+      # command on the VPS, so this string arrives as $SSH_ORIGINAL_COMMAND and
+      # the only thing the server will accept is 40 hex characters.
+      #
+      # The SHA, not `origin/main`: when a second merge lands while this build
+      # is running, origin/main is no longer what was verified.
+      - name: Deploy ${{ github.sha }}
+        env:
+          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+          DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
+          DEPLOY_PORT: ${{ vars.DEPLOY_PORT || '22' }}
+        run: |
+          ssh -i ~/.ssh/id_deploy -p "$DEPLOY_PORT" \
+              -o IdentitiesOnly=yes -o BatchMode=yes \
+              -o StrictHostKeyChecking=yes -o ConnectTimeout=15 \
+              "$DEPLOY_USER@$DEPLOY_HOST" "${{ github.sha }}"
