@@ -60,10 +60,17 @@ docs/         user documentation and screenshots
 
 Production runs as three application containers:
 
-```text
-web  -> static frontend + /v1/api proxy
-api  -> Express + Sequelize
-db   -> MySQL
+```mermaid
+flowchart LR
+    browser["Browser"]
+    subgraph containers["Application containers"]
+        web["web<br/>static frontend + /v1/api proxy"]
+        api["api<br/>Express + Sequelize"]
+        db["db<br/>MySQL"]
+    end
+    browser -- "one origin" --> web
+    web -- "/v1/api" --> api
+    api --> db
 ```
 
 Traefik sits at the edge for TLS and routing.
@@ -212,15 +219,9 @@ The frontend uses **vanilla JavaScript with no framework and no build step**.
 
 Scripts are loaded directly by the browser:
 
-```text
-U
-→ DOM helpers
-→ Rules
-→ API
-→ Store
-→ Controllers
-→ Views
-→ App
+```mermaid
+flowchart LR
+    U["U"] --> Dom["DOM helpers"] --> Rules["Rules"] --> Api["API"] --> Store["Store"] --> Controllers["Controllers"] --> Views["Views"] --> App["App"]
 ```
 
 A view follows a simple lifecycle:
@@ -245,9 +246,11 @@ Views do not call the API directly. `Store` owns communication with the server a
 
 A domain rule therefore has one implementation:
 
-```text
-browser -> immediate feedback
-server  -> authoritative enforcement
+```mermaid
+flowchart LR
+    rules["shared/rules.js<br/>one implementation"]
+    rules --> browser["Browser<br/>immediate feedback"]
+    rules --> server["Server<br/>authoritative enforcement"]
 ```
 
 Client-side validation is never the only enforcement point.
@@ -307,9 +310,10 @@ SQLite is used for isolated automated tests.
 
 There are intentionally no migrations. Sequelize applies the schema at startup using `sync()`:
 
-```text
-development/test -> force
-deployed         -> alter
+```mermaid
+flowchart LR
+    dev["development / test"] --> force["sync({ force: true })"]
+    deployed["deployed"] --> alter["sync({ alter: true })"]
 ```
 
 This is a deliberate architectural trade-off, not an omission.
@@ -354,16 +358,19 @@ docker compose up -d --build
 
 The production topology is:
 
-```text
-Traefik
-   |
-   v
- web
-   |
-   +---- /v1/api ----> api
-                        |
-                        v
-                       db
+```mermaid
+flowchart TB
+    internet["Internet"]
+    subgraph edge["Public edge"]
+        traefik["Traefik<br/>TLS, HTTPS redirection, security middleware"]
+        web["web<br/>static frontend + /v1/api proxy"]
+    end
+    subgraph internal["Internal network, not published to the host"]
+        api["api<br/>Express + Sequelize"]
+        db["db<br/>MySQL 8"]
+    end
+    internet --> traefik --> web
+    web -- "/v1/api" --> api --> db
 ```
 
 The database is kept on an internal network and is not published to the host.
@@ -398,19 +405,18 @@ In that order, because each leans on the one before: a landing page that points 
 
 The included implementation is deliberately small:
 
-```text
-push to main
-   |
-   v
-GitHub-hosted runner        clean checkout, npm ci from the lockfile,
-   |                        then each suite as its own named step
-   v
-ssh user@vps "<commit sha>"
-   |
-   v
-forced command on the VPS   fetch, reset to the verified commit, rebuild,
-                            wait on the containers' own healthchecks,
-                            roll back to the previous commit on failure
+```mermaid
+flowchart TB
+    push["push to main"]
+    runner["GitHub-hosted runner<br/>clean checkout, npm ci from the lockfile,<br/>then each suite as its own named step"]
+    ssh["ssh user@vps 'commit sha'<br/>the key is pinned to one script and refuses<br/>anything that is not a 40-character SHA"]
+    deploy["forced command on the VPS<br/>fetch, reset to the verified commit, rebuild,<br/>wait on the containers' own healthchecks"]
+    healthy{"healthy?"}
+    live["live on the commit CI verified"]
+    rollback["roll back to the previous commit"]
+    push --> runner --> ssh --> deploy --> healthy
+    healthy -- yes --> live
+    healthy -- no --> rollback
 ```
 
 The key GitHub holds is pinned to that one script and refuses any argument that is not a 40-character commit SHA, so a stolen CI key can deploy a commit that is already in the repository and do nothing else.
@@ -439,20 +445,14 @@ Three things the skill insists on:
 
 One unauthenticated POST provisions a whole tenant — staff, sites, customers, a week of work either side of today, private notes and an audit trail — signs the visitor in as its owner, and deletes every row of it a day later.
 
-```text
-landing page
-   |  POST /v1/api/demo
-   v
-door          metered: a ceiling on live demos, a speed bump per address
-   |
-   v
-tenant        an ORDINARY tenant with one boolean column, seeded in one
-   |          transaction, signed in with a session capped at its expiry
-   v
-expiry        refused on the REQUEST the moment it passes
-   |
-   v
-sweeper       deletes children before parents, with force: true
+```mermaid
+flowchart TB
+    landing["landing page"]
+    door["door<br/>metered: a ceiling on live demos, a speed bump per address"]
+    tenant["tenant<br/>an ORDINARY tenant with one boolean column, seeded in one<br/>transaction, signed in with a session capped at its expiry"]
+    expiry["expiry<br/>refused on the REQUEST the moment it passes"]
+    sweeper["sweeper<br/>deletes children before parents, with force: true"]
+    landing -- "POST /v1/api/demo" --> door --> tenant --> expiry --> sweeper
 ```
 
 The rules the implementation is built on:
