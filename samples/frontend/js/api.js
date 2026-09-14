@@ -27,7 +27,7 @@ window.API = (function () {
   var CSRF_COOKIE = 'acme_csrf';
   var CSRF_HEADER = 'X-CSRF-Token';
 
-  var listeners = { unauthorized: [] };
+  var listeners = { unauthorized: [], 'demo-expired': [] };
   var refreshing = null;
 
   /**
@@ -118,6 +118,14 @@ window.API = (function () {
           }
           return send(method, path, body, { noRetry: true });
         });
+      }
+
+      /* A demo tenant whose day ran out mid-session answers this to every
+         call, and there is nothing the screen can do about it — the rows are
+         gone. Announced once here so the app can leave, rather than reported
+         as a failed save on every click until somebody closes the tab. */
+      if (res.status === 403 && data && data.error === 'demo_expired') {
+        emit('demo-expired');
       }
 
       if (!res.ok) {

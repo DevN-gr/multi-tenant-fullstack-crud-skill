@@ -40,12 +40,17 @@ Its annotated files document not just what the architecture does, but why partic
 
 * **Offers automatic deployment at the moment it becomes relevant, and asks first.** A first deployment, a question about making the app publicly accessible, or an MVP about to be used is when push-to-main CI is worth raising — as a question, together with whether the VPS hosts anything else, because that answer decides every name placed on that box.
 
+* **Offers a landing page at the same moment, built from what the product does today.** A feature list written from the roadmap is a support ticket per line. The page is a separate document that loads none of the application, because a marketing page that boots the app answers 401 to every visitor before it paints.
+
+* **Offers a demo anybody can try without signing up — and deletes it.** One button provisions a whole tenant, seeded and signed in, gone a day later. It is an ordinary tenant rather than a mode, its expiry is enforced on the request rather than by a timer, and it is deleted with `force: true`, because these models are `paranoid` and a soft delete would make "deleted after a day" false in the only way that matters.
+
 ## Architecture
 
 The stack is intentionally small:
 
 ```text
-frontend/     browser UI: app.html, css/, js/, js/views/
+frontend/     browser UI: index.html (public landing page), app.html (the
+              app), css/, js/, js/views/
 shared/       rules.js and utils.js, used by browser and server
 backend/      Express + Sequelize API
 tools/        static server, API proxy, browser smoke tests, checks
@@ -279,7 +284,7 @@ npm run smoke
 
 Puppeteer drives the running application end to end.
 
-Forms, uploads and multi-step interactions are tested by actually using them rather than by testing only the functions that are supposed to issue their requests.
+Forms, uploads and multi-step interactions are tested by actually using them rather than by testing only the functions that are supposed to issue their requests. That includes the landing page's demo button, which is the one control in the product pressed first by people who have never signed in.
 
 The browser suite also fails on:
 
@@ -375,11 +380,21 @@ The API image:
 
 Traefik provides TLS, HTTPS redirection and reusable security-related HTTP middleware.
 
-## Continuous deployment
+## Going live
 
-The skill also covers going live, and treats it as a decision rather than a default.
+The skill treats shipping as a decision rather than a default.
 
-When the user reaches a first deployment, asks how to deploy or how to make the application publicly accessible, or arrives at an MVP somebody is about to use, the agent **offers** a push-to-main pipeline instead of building one unasked — and asks whether the VPS hosts only this application or other services too, because that answer decides whether every artifact placed on that box needs a project-specific name.
+When the user reaches a first deployment, asks how to deploy or how to make the application publicly accessible, or arrives at an MVP somebody is about to use, three things become relevant at once — and the agent **offers all three as questions** rather than building any of them unasked:
+
+| Offer | The question it turns on |
+| --- | --- |
+| Push-to-main deployment | Does the VPS host only this application, or other services too? That answer decides every name placed on that box. |
+| A public landing page | Should `/` be a public page at all, and what does the product do *today*? |
+| A no-sign-up demo | Do you want an unauthenticated stranger writing to your production database? |
+
+In that order, because each leans on the one before: a landing page that points at nothing is worse than none, and the demo is the button on the landing page. "Just the deploy" is a complete answer — a product with one real user and no landing page is a normal product.
+
+### Continuous deployment
 
 The included implementation is deliberately small:
 
@@ -405,6 +420,51 @@ The commit deployed is the one CI verified rather than `origin/main`, which is n
 `samples/ops/test-deploy.sh` drives the deploy script through a good deploy, refused commands, an unhealthy container, a build failure, a start-up timeout and a lock contest, using a real git repository and a stubbed Docker, so the rollback path is proven before the day it is needed.
 
 `samples/ops/README.md` is the operator runbook for the steps only someone with shell on the VPS can perform.
+
+### The landing page
+
+`/` serves a public page and the application moves to `/app.html`.
+
+It is a **separate document** rather than a route inside the app, and that is the whole design. The app boots by asking `/auth/me` who you are; a marketing page that did that would answer 401 to every visitor, log two console errors and paint its hero after a round trip. So the landing page loads none of the application's scripts — and the frontend suite evaluates its one script in an *empty* JavaScript context to keep it that way.
+
+It shares the application's design tokens and nothing else, so a rebrand cannot leave the marketing page describing a product that no longer looks like that.
+
+Three things the skill insists on:
+
+* **The feature list is written from the code**, read back, and cut by the user. A feature list written from the roadmap is a support ticket per line.
+* **`/` is what the healthcheck fetches.** Moving the front door means moving the mapping, the healthcheck's expectation and the browser suite in one change; a test asserts that whatever `/` resolves to is a file that actually exists, because this has already cost one deployment.
+* **The application carries `noindex`**, the landing page does not, and `robots.txt` needs a MIME entry or it is served as a download.
+
+### The demo tenant
+
+One unauthenticated POST provisions a whole tenant — staff, sites, customers, a week of work either side of today, private notes and an audit trail — signs the visitor in as its owner, and deletes every row of it a day later.
+
+```text
+landing page
+   |  POST /v1/api/demo
+   v
+door          metered: a ceiling on live demos, a speed bump per address
+   |
+   v
+tenant        an ORDINARY tenant with one boolean column, seeded in one
+   |          transaction, signed in with a session capped at its expiry
+   v
+expiry        refused on the REQUEST the moment it passes
+   |
+   v
+sweeper       deletes children before parents, with force: true
+```
+
+The rules the implementation is built on:
+
+* **It is an ordinary tenant, not a mode.** Same tables, same scope filters, same controllers. Nothing anywhere says `if (demo)`, so the tenant boundary that keeps two customers apart is what keeps a demo away from real data — and that boundary is already tested per role over real HTTP.
+* **Expiry is enforced on the request, not by the timer.** The sweeper is about storage. If it were the only thing between an expired demo and its data, a crashed timer would silently extend every demo for ever.
+* **`force: true`, or it is not deleted.** The models are `paranoid`; an ordinary destroy writes a `deletedAt` and keeps the row. The suite asserts the counts with `paranoid: false`, which is the only read that can tell the difference.
+* **No password, so there is no second way in.** Demo accounts are created without one, and the login endpoint cannot succeed for an account with no stored hash however it is asked.
+* **The seed runs in production**, so it may not require a devDependency, and every write takes the caller's transaction.
+* **Off by default, and 404 when off** — a 403 would confirm to an unauthenticated caller that the endpoint is there.
+
+Because the product's claim is that what you can see depends on who you are, the demo seeds the whole cast and puts a switcher in its banner: the same tenant, seen as the owner, the front desk, a member and a portal customer.
 
 ## Install
 
@@ -472,7 +532,8 @@ and upload the resulting archive where Agent Skills are supported.
 SKILL.md
   The Agent Skill itself:
   architecture, CRUD hooks, access model,
-  tests, configuration and deployment.
+  tests, configuration, deployment,
+  the landing page and the demo tenant.
 
 samples/
   Runnable reference implementation.
@@ -486,12 +547,14 @@ samples/
     tenant scope
     role capabilities
     audit trail
+    demo tenant: door, seed and sweeper
 
   frontend/
     vanilla ES5 JavaScript
     no framework
     no build step
     load/render/mount views
+    public landing page (index.html)
 
   shared/
     rules.js
@@ -557,6 +620,10 @@ For example:
 
 > This is ready for its first real users — how do I put it on a domain?
 
+> Put a landing page on it that describes what it actually does.
+
+> Let people try it without signing up, on data that cleans itself up.
+
 For a new application, the skill helps lay out the repository, reuse the framework pieces and implement the first domain-specific resources against your access model.
 
 For an existing application built on this architecture, it follows the model, controller, view, configuration and testing conventions already established.
@@ -597,6 +664,8 @@ A change is not complete until the relevant checks pass.
 * [ ] `npm run check` passes.
 * [ ] Configuration changes are reflected everywhere they are declared.
 * [ ] `README.md` reflects architectural changes.
+* [ ] A new user-facing feature is reflected on the landing page, which still names nothing the product does not do.
+* [ ] A new model or column is seeded into the demo tenant and deleted by the sweeper.
 * [ ] User-visible strings follow the product language.
 * [ ] Code, comments and tests remain in English.
 * [ ] The interface has been checked at mobile and desktop widths.

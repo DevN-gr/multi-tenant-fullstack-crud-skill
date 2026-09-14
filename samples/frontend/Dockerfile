@@ -8,7 +8,8 @@
 #  The app has no build step and no dependencies — it IS the files it serves.
 #  What this image adds is the mappings tools/server.js applies:
 #
-#      /            frontend/     the app shell
+#      /            frontend/     the landing page (index.html); the app
+#                                 itself is /app.html
 #      /shared/     shared/       the rules engine, shared with the API
 #      /docs/       docs/         the user manual PDF, and only that
 #      /v1/api/     proxied to the API

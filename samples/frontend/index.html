@@ -1,0 +1,168 @@
+<!doctype html>
+<html lang="en" data-theme="light">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="color-scheme" content="light dark">
+<title>Acme — scheduling and records for teams that work across sites</title>
+<meta name="description" content="Acme keeps customers, scheduled work, private notes and a full audit trail for teams working across several sites — with each role seeing only what it should.">
+<link rel="icon" href="favicon.svg" type="image/svg+xml">
+
+<!--
+  THE LANDING PAGE. `/` serves this; the application is at `/app.html`.
+
+  It is a separate DOCUMENT rather than a route inside the app, and that is
+  the whole design:
+
+    • It renders with no session and no JavaScript. The app boots by asking
+      /auth/me who you are — a marketing page that did that would answer 401
+      to every visitor, log two console errors and paint its hero after a
+      round trip.
+    • It is the only page here meant to be indexed. app.html carries
+      `noindex`, because a search result pointing at a sign-in form is a
+      search result nobody wanted.
+    • It loads none of the app's eleven scripts. tests/run-tests.js evaluates
+      js/landing.js in an EMPTY context to keep it that way — the day this
+      page needs `U` or `Store` is the day it has quietly become a second
+      copy of the app shell.
+
+  It links css/styles.css for the tokens, not for the components: every
+  colour, radius and space on this page is the same custom property the
+  application uses, so the marketing page and the product cannot drift apart
+  on a rebrand.
+
+  EVERY VISIBLE STRING BELOW IS PLACEHOLDER COPY for the sample domain.
+  Rewrite all of it for the product. What is worth keeping is the shape: one
+  sentence saying what this is for whom, the features that are actually
+  built, what the demo costs the visitor, and one primary action.
+-->
+<link rel="stylesheet" href="css/styles.css">
+<link rel="stylesheet" href="css/landing.css">
+</head>
+<body class="landing">
+
+<header class="landing-head">
+  <span class="brand">Acme</span>
+  <nav>
+    <a href="/app.html#/login">Sign in</a>
+  </nav>
+</header>
+
+<main>
+
+  <section class="hero">
+    <h1>Every site, every job, every change — and only what each person should see.</h1>
+    <p class="lede">
+      Acme keeps your customers, your scheduled work and your private notes in
+      one place for teams working across several sites, with a complete record
+      of who changed what.
+    </p>
+
+    <div class="cta">
+      <button type="button" id="try-demo" class="primary">Try the demo</button>
+      <a class="secondary" href="/app.html#/login">Sign in</a>
+    </div>
+
+    <!--
+      The terms are said BEFORE the button is pressed, not on the screen
+      after it. Somebody about to type into a product deserves to know that
+      what they type is deleted tomorrow — and it is the difference between a
+      demo and a trap for real customer data.
+    -->
+    <p class="terms">
+      No sign-up, no card, no e-mail address. You get your own copy of Acme
+      with a week of sample work already in it. It is deleted automatically
+      after 24 hours, so please do not put real customer data in it.
+    </p>
+
+    <p class="status" id="demo-status" role="status" aria-live="polite" hidden></p>
+  </section>
+
+  <section class="features" aria-labelledby="features-heading">
+    <h2 id="features-heading">What it does</h2>
+    <ul class="grid">
+      <li>
+        <h3>Work across sites</h3>
+        <p>
+          Each site keeps its own book. Staff are attached to the sites they
+          work at, and see the customers and jobs of those sites only.
+        </p>
+      </li>
+      <li>
+        <h3>A diary that refuses double bookings</h3>
+        <p>
+          Nobody is booked twice at ten o'clock and no customer is expected in
+          two places at once. The same rules run as you type and again on the
+          server.
+        </p>
+      </li>
+      <li>
+        <h3>Customers, with their history</h3>
+        <p>
+          Contact details, every job they have had and what is still open —
+          on one screen rather than four.
+        </p>
+      </li>
+      <li>
+        <h3>Private notes stay private</h3>
+        <p>
+          Notes belong to the people who wrote them. The front desk can book
+          and reschedule and never reads a word of them.
+        </p>
+      </li>
+      <li>
+        <h3>A full audit trail</h3>
+        <p>
+          One entry per changed field: who, when, from what, to what. The
+          trail obeys the same access rules as the records it describes.
+        </p>
+      </li>
+      <li>
+        <h3>Roles that mean something</h3>
+        <p>
+          Owner, front desk, staff and a customer portal. What each one can
+          see is enforced by the server, not by hiding buttons.
+        </p>
+      </li>
+    </ul>
+  </section>
+
+  <section class="roles" aria-labelledby="roles-heading">
+    <h2 id="roles-heading">Who sees what</h2>
+    <p class="lede">
+      The demo signs you in as the owner. Use the switcher in the banner to
+      become anybody else on this list and watch the screens change.
+    </p>
+    <div class="scroller">
+      <table class="table">
+        <thead>
+          <tr><th>Role</th><th>Customers</th><th>Private notes</th><th>Audit trail</th></tr>
+        </thead>
+        <tbody>
+          <tr><td>Owner</td><td>Every site</td><td>Yes</td><td>Yes</td></tr>
+          <tr><td>Front desk</td><td>Every site</td><td>No</td><td>Yes</td></tr>
+          <tr><td>Staff</td><td>Their own sites</td><td>Their own</td><td>No</td></tr>
+          <tr><td>Customer portal</td><td>Their own record</td><td>Shared with them</td><td>No</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <section class="closing">
+    <h2>See it with data in it</h2>
+    <p>A tenant of your own, seeded and signed in, in about a second.</p>
+    <div class="cta">
+      <button type="button" id="try-demo-2" class="primary">Try the demo</button>
+    </div>
+  </section>
+
+</main>
+
+<footer class="landing-foot">
+  <span>Acme</span>
+  <a href="/app.html#/login">Sign in</a>
+</footer>
+
+<script src="js/landing.js"></script>
+</body>
+</html>

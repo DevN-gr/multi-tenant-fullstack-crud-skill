@@ -1,8 +1,10 @@
 /* ══════════════════════════════════════════════════════════════════════════
-   The one hand-written route file.
+   Signing in — one of the two hand-written route files, the other being
+   routes/demo.js.
 
-   Signing in is a transition, not a resource: there is no row called "a
-   session" to POST. Everything else in this API goes through crudThat.
+   Both are here for the same reason: a transition is not a resource. There is
+   no row called "a session" to POST, and no row called "a demo tenant"
+   either. Everything that IS a resource goes through crudThat.
 
    What the browser gets back is three cookies and a JSON principal:
 
@@ -23,34 +25,22 @@ const c = require('../config-dir');
 const auth = require('../middleware/auth');
 const csrf = require('../middleware/csrf');
 const passwords = require('../services/passwords');
-const capabilities = require('../services/capabilities');
+const sessions = require('../services/sessions');
 
 module.exports = (db) => {
   const router = asyncRouter(express.Router());
 
-  /** The principal, as the browser needs it. Capabilities travel with it so
-      the frontend has one definition of the access model rather than two. */
-  function principal(user) {
-    return {
-      id: user.id,
-      name: user.name,
-      email: user.email,
-      user_type: user.user_type,
-      OrganizationId: user.OrganizationId,
-      all_workspaces: user.all_workspaces,
-      capabilities: capabilities.listFor(user.user_type)
-    };
-  }
+  /* Opening a session and describing the principal both live in
+     services/sessions.js, because routes/demo.js opens one too and a second
+     copy of "cookies, refresh token, CSRF token" is a copy that forgets one
+     of the three. */
+  const principal = (user) => sessions.principalFor(db, user);
 
-  async function issueRefresh(user) {
-    const { token, hash } = passwords.mintToken();
-    await db.AuthToken.create({
-      UserId: user.id,
-      kind: 'refresh',
-      token_hash: hash,
-      expires_at: new Date(Date.now() + auth.refreshTtlMs())
-    });
-    return token;
+  /** When this user's tenant stops existing, or null for an ordinary one. */
+  async function tenantExpiry(user) {
+    if (!user.OrganizationId) return null;
+    const org = await db.Organization.findByPk(user.OrganizationId, { attributes: ['expires_at'] });
+    return org ? org.expires_at : null;
   }
 
   router.post('/login', async (req, res) => {
@@ -64,9 +54,8 @@ module.exports = (db) => {
       await passwords.verify(req.body.password, user.password);
     if (!ok) return res.status(401).json({ error: 'invalid_credentials' });
 
-    auth.setSession(res, user, await issueRefresh(user));
-    csrf.issue(res);
-    res.json({ user: principal(user) });
+    await sessions.open(db, res, user);
+    res.json({ user: await principal(user) });
   });
 
   router.post('/refresh', async (req, res) => {
@@ -86,9 +75,10 @@ module.exports = (db) => {
     /* Rotated, not reused: a refresh token that survives its own use is a
        refresh token somebody else can still present. */
     await row.update({ used_at: new Date() });
-    auth.setSession(res, user, await issueRefresh(user));
-    csrf.issue(res);
-    res.json({ user: principal(user) });
+    /* Capped at the tenant's own life where it has one, so refreshing a demo
+       session cannot walk it past the day the tenant is deleted. */
+    await sessions.open(db, res, user, { notAfter: await tenantExpiry(user) });
+    res.json({ user: await principal(user) });
   });
 
   router.post('/logout', async (req, res) => {
@@ -107,7 +97,7 @@ module.exports = (db) => {
   router.get('/me', auth.needAuth, async (req, res) => {
     const user = await db.User.findByPk(req.user.id);
     if (!user) return res.status(401).json({ error: 'unauthenticated' });
-    res.json({ user: principal(user) });
+    res.json({ user: await principal(user) });
   });
 
   router.post('/change-password', auth.needAuth, async (req, res) => {

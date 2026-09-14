@@ -2,7 +2,8 @@
    Minimal static file server — no dependencies.
 
    Serves `frontend/` as the document root, which is exactly what the web
-   container ships, plus two mounts that live outside it and one proxy:
+   container ships — `/` is the landing page and `/app.html` the application
+   — plus two mounts that live outside it and one proxy:
 
      /shared/…   the rules engine and date helpers the backend require()s too
      /docs/…     the user manual PDF, linked from every sidebar — and only
@@ -98,6 +99,11 @@ const MIME = {
   '.jpg': 'image/jpeg',
   '.ico': 'image/x-icon',
   '.md': 'text/markdown; charset=utf-8',
+  /* robots.txt, and anything else a crawler asks for by name. Without a type
+     it would be served as application/octet-stream, which a browser offers to
+     save rather than display and a crawler is entitled to ignore — a landing
+     page's SEO undone by a missing line in a lookup table. */
+  '.txt': 'text/plain; charset=utf-8',
   '.pdf': 'application/pdf',
   '.woff2': 'font/woff2'
 };
@@ -259,14 +265,23 @@ function start(port = 5173) {
     if (req.url.startsWith(API_PREFIX)) return proxy(req, res);
 
     let rel = decodeURIComponent(req.url.split('?')[0]);
-    /* The shell is app.html — there is no index.html — and this mapping is
-       the ONLY thing serving the bare URL. It is load-bearing twice over:
-       both containers' HEALTHCHECK fetches `/` and expects 200, so pointing
-       this at a file that does not exist leaves a container that serves
-       every real request correctly and is still reported unhealthy for
-       ever — which a deploy that waits on health reads as a failed release
-       and rolls back. */
-    if (rel === '/') rel = '/app.html';
+    /* `/` is the LANDING PAGE — frontend/index.html — and the application
+       lives at `/app.html`. Two different documents on purpose: the app boots
+       by asking who you are, and a marketing page that did that would answer
+       401 to every visitor before painting anything.
+
+       This mapping is the only thing serving the bare URL, and it is
+       load-bearing twice over: both containers' HEALTHCHECK fetches `/` and
+       expects 200, so pointing it at a file that does not exist leaves a
+       container that serves every real request correctly and is still
+       reported unhealthy for ever — which a deploy that waits on health reads
+       as a failed release and rolls back.
+
+       That happened once already with this line pointing at an index.html
+       the app did not have. The rule it left behind: whatever `/` resolves
+       to, the browser suite fetches it and asserts 200, because the
+       healthcheck cannot. */
+    if (rel === '/') rel = '/index.html';
 
     /* Keep every request inside the directory its mount points at, and
        inside what that mount is willing to serve.

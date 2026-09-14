@@ -105,7 +105,15 @@ function attachUser(db) {
 
     const user = await db.User.findOne({
       where: { id: claims.sub, status: 'active' },
-      include: [{ model: db.UserWorkspace, as: 'UserWorkspaces', attributes: ['WorkspaceId'], required: false }]
+      include: [
+        { model: db.UserWorkspace, as: 'UserWorkspaces', attributes: ['WorkspaceId'], required: false },
+        /* Joined here rather than fetched again in middleware/tenant.js: the
+           principal is already being read on every request, and the tenant's
+           own state — is it a demo, has its day run out — has to be known
+           before any controller hook runs. A second query per request to
+           learn it would be a second query per request for ever. */
+        { model: db.Organization, attributes: ['id', 'status', 'is_demo', 'expires_at'], required: false }
+      ]
     });
     if (!user) return next();
 
@@ -118,6 +126,16 @@ function attachUser(db) {
       all_workspaces: user.all_workspaces,
       workspaceIds: (user.UserWorkspaces || []).map((uc) => uc.WorkspaceId),
       capabilities: capabilities.listFor(user.user_type),
+      /* The tenant itself, as a plain object. middleware/tenant.js reads it
+         to refuse an expired demo, and routes/demo.js to refuse a switch
+         outside one. Null for the superadmin, who stands outside every
+         tenant. */
+      organization: user.Organization ? {
+        id: user.Organization.id,
+        status: user.Organization.status,
+        is_demo: user.Organization.is_demo,
+        expires_at: user.Organization.expires_at
+      } : null,
       /* Set by middleware/tenant.js for portal logins. */
       CustomerId: null
     };

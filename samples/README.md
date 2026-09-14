@@ -3,7 +3,8 @@
 Reference files for the architecture described in `SKILL.md`. They are a
 working skeleton of a small multi-tenant product — an organization with
 workspaces, staff, customers, scheduled tasks, private notes and an audit
-trail — chosen because it exercises every rule the skill talks about: a tenant
+trail, behind a public landing page whose one button hands a stranger a
+throwaway tenant of their own — chosen because it exercises every rule the skill talks about: a tenant
 boundary, a second scope inside it, a role that is refused a whole model, a
 portal login scoped to one row, and domain rules that must hold on both sides
 of the wire.
@@ -31,6 +32,9 @@ name:
 | `frontend/js/api.js` | Errors as values, one silent 401 retry, CSRF echoed from a readable cookie. |
 | `ops/acme-deploy.sh` | The deploy half of push-to-main. Rename the file, the lock and the container names; the refusal, the rollback and the lock are the point. |
 | `ops/test-deploy.sh` | Drives that script through every path — including the rollback — with a real git repository and a stubbed `docker`. |
+| `backend/services/sessions.js` | Opening a session in one place, because two route files do it and the second copy is the one that forgets the CSRF token. |
+| `backend/services/demo.js` | The demo door, the expiry and the sweeper. `force: true` and the purge order are the whole file; rename the models in `PURGE_ORDER` to yours. |
+| `backend/routes/demo.js` | The unauthenticated endpoint and the role switch. Read its four guards before changing it — it is the one route that hands over another account's session. |
 
 ## What to rewrite for your domain
 
@@ -45,11 +49,17 @@ Everything else. In particular:
   need this file: it is where anything the browser and the server must agree
   about lives.
 - `frontend/js/views/*` — your screens.
+- `frontend/index.html` — your landing page. Every visible string in it is
+  placeholder copy; what is worth keeping is the shape, and the fact that it
+  loads none of the application.
+- `backend/seed/demo.js` — what a demo tenant contains. Keep the shape: the
+  whole cast, a week either side of today, and one record of the restricted
+  model, so a visitor can see a role being refused something.
 
 ## Running the frontend suite as-is
 
 ```bash
-node tests/run-tests.js       # 29 assertions, no dependencies, no install
+node tests/run-tests.js       # 41 assertions, no dependencies, no install
 ```
 
 It passes against these files unchanged, and it is the fastest way to see the

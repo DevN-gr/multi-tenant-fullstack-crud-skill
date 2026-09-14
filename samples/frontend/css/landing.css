@@ -1,0 +1,72 @@
+/* ══════════════════════════════════════════════════════════════════════════
+   The landing page only.
+
+   No tokens are defined here. css/styles.css is loaded first and owns every
+   colour, radius and space in the product; this file spends them. A landing
+   page with its own palette is a landing page that is one rebrand away from
+   not matching the thing it is selling.
+
+   Two rules the app's stylesheet does not need and this one does: the page
+   is read at arm's length rather than worked in, so the type is larger; and
+   it is the one page a phone reaches first, so every section is checked at
+   390px before anything else.
+   ═══════════════════════════════════════════════════════════════════════ */
+
+.landing { display: flex; flex-direction: column; min-height: 100vh; }
+.landing main { flex: 1; }
+
+.landing-head,
+.landing-foot {
+  display: flex; align-items: center; justify-content: space-between;
+  gap: var(--s-2); padding: var(--s-2) var(--s-3);
+  border-block-end: 1px solid var(--border);
+}
+.landing-foot { border-block-end: 0; border-block-start: 1px solid var(--border); color: var(--text-2); }
+.landing-head .brand { font-weight: 600; }
+.landing-head a, .landing-foot a { color: var(--text-2); text-decoration: none; }
+.landing-head a:hover, .landing-foot a:hover { color: var(--text); }
+
+.landing section { padding: var(--s-3); max-width: 900px; margin-inline: auto; }
+
+.hero h1 { font-size: 32px; line-height: 1.2; margin: 0 0 var(--s-2); }
+.lede { font-size: 16px; color: var(--text-2); margin: 0 0 var(--s-3); max-width: 60ch; }
+
+.cta { display: flex; flex-wrap: wrap; gap: var(--s-1); align-items: center; }
+.cta .primary,
+.cta .secondary {
+  font: inherit; cursor: pointer; appearance: none; text-decoration: none;
+  padding: var(--s-1) var(--s-2); border-radius: var(--r-1); border: 1px solid var(--border);
+}
+.cta .primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+.cta .primary[disabled] { opacity: .6; cursor: default; }
+.cta .secondary { background: none; color: var(--text); }
+.cta .secondary:hover { background: var(--surface); }
+
+.terms { color: var(--text-2); font-size: 13px; margin: var(--s-2) 0 0; max-width: 60ch; }
+.status { margin: var(--s-2) 0 0; padding: var(--s-1) var(--s-2); border-radius: var(--r-1);
+  background: var(--surface); max-width: 60ch; }
+.status a { color: var(--accent); }
+
+.features .grid { list-style: none; margin: 0; padding: 0; display: grid; gap: var(--s-2);
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); }
+.features li { border: 1px solid var(--border); border-radius: var(--r-2); padding: var(--s-2); }
+.features h3 { margin: 0 0 var(--s-1); font-size: 15px; }
+.features p { margin: 0; color: var(--text-2); }
+
+/* A table is the honest shape for "who sees what", and a table is also the
+   one thing on this page that cannot be made narrower than its content — so
+   it gets its own scroller rather than making the page scroll sideways. */
+.scroller { overflow-x: auto; }
+.roles .table { min-width: 520px; }
+
+.closing { text-align: center; }
+.closing .cta { justify-content: center; }
+
+@media (max-width: 720px) {
+  .landing section { padding: var(--s-2); }
+  .hero h1 { font-size: 24px; }
+  /* Full width, and the primary one first: a thumb reaches the bottom of the
+     screen, and a 44px target is the smallest one that is reliably hit. */
+  .cta { flex-direction: column; align-items: stretch; }
+  .cta .primary, .cta .secondary { text-align: center; padding: 12px var(--s-2); }
+}

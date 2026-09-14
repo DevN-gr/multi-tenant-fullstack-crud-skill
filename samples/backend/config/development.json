@@ -4,5 +4,8 @@
   "db_logging": false,
 
   "auth": { "cookie_secure": false },
-  "mail": { "transport": "console" }
+  "mail": { "transport": "console" },
+
+  "_demo_comment": "On locally, and short-lived, so the landing page's button works while developing and the sweeper's work is visible within one sitting.",
+  "demo": { "enabled": true, "ttl_hours": 2, "sweep_minutes": 5 }
 }

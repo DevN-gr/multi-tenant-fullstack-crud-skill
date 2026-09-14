@@ -59,7 +59,26 @@ module.exports = (db) => {
   };
 
   controller.deleteFilters = async () => scope.DENY;
-  controller.readOnlyFields = async () => ['slug', 'createdAt', 'updatedAt', 'deletedAt'];
+
+  /**
+   * The address a demo was requested from is visible to the platform account
+   * and to nobody else — not even to the owner of the tenant it created.
+   *
+   * It is somebody's IP address: personal data, collected for one purpose
+   * (spacing out requests at the door) and readable through this endpoint by
+   * every role in the tenant unless it is named here. Hidden fields also
+   * cannot be filtered or sorted on, so it cannot be probed indirectly
+   * either.
+   */
+  controller.hiddenFields = async (req) =>
+    (req.user.user_type === 'superadmin' ? [] : ['created_ip']);
+
+  /* The three demo columns are the sweeper's and the door's, never a
+     client's: an expiry a tenant could PUT is a tenant that can grant itself
+     another week, and an `is_demo` a tenant could clear is a tenant that
+     stops being swept at all. */
+  controller.readOnlyFields = async () =>
+    ['slug', 'is_demo', 'expires_at', 'created_ip', 'createdAt', 'updatedAt', 'deletedAt'];
   controller.searchableFields = async (req) =>
     (req.user.user_type === 'superadmin' ? ['name', 'slug'] : null);
   controller.defaultSortingColumn = 'name';

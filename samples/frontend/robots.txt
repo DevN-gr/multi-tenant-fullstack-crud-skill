@@ -1,0 +1,6 @@
+# The landing page is the only thing here meant to be found. The application
+# itself carries `noindex` in its own <head>, and this file says the same
+# thing to a crawler that never fetches it.
+User-agent: *
+Disallow: /app.html
+Allow: /

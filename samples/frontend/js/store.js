@@ -131,6 +131,26 @@ window.Store = (function () {
   }
 
   /**
+   * Become somebody else inside a demo tenant.
+   *
+   * Everything held was loaded under the previous principal — the
+   * capabilities, the staff list, the slice on screen — so all of it is
+   * dropped before the new one is read. Keeping the slice would leave the
+   * owner's eight customers on screen while a member with four signs in,
+   * which is the demo demonstrating the opposite of what it is for.
+   */
+  function switchDemoUser(id) {
+    return API.post('/demo/switch', { UserId: id }).then(function (res) {
+      if (!res.ok) return res;
+      me = null;
+      caps = [];
+      ref = emptyRef();
+      slice = emptySlice();
+      return boot().then(function () { return res; });
+    });
+  }
+
+  /**
    * Fetch the slice one screen needs. A plain `load` builds a FRESH slice and
    * fills only what it asked for — which is why a write that re-reads what it
    * changed must use `loadMore`, or refreshing one collection discards every
@@ -221,7 +241,8 @@ window.Store = (function () {
   }
 
   return {
-    boot: boot, logout: logout, load: load, loadMore: loadMore, subscribe: subscribe,
+    boot: boot, logout: logout, switchDemoUser: switchDemoUser,
+    load: load, loadMore: loadMore, subscribe: subscribe,
     currentUser: currentUser, can: can,
     workspaces: workspaces, users: users, customers: customers, tasks: tasks,
     userName: userName, workspaceName: workspaceName,

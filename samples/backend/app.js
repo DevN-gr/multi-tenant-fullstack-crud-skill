@@ -4,7 +4,7 @@
    Read the mount list below and you have read the API. Every resource is
    `crudThat(model, controller)`; the behaviour that makes each one correct
    lives in its controller's hooks, not in a route. The only hand-written
-   routes are /auth, which is a transition rather than a resource.
+   routes are /auth and /demo, which are transitions rather than resources.
 
    Middleware order is load-bearing:
 
@@ -26,6 +26,7 @@ const pinoHttp = require('pino-http');
 const { wrap } = require('./utils/async-handler');
 const crudThat = require('./routes/crud');
 const authRoutes = require('./routes/auth');
+const demoRoutes = require('./routes/demo');
 const authMiddleware = require('./middleware/auth');
 const csrf = require('./middleware/csrf');
 const tenantMiddleware = require('./middleware/tenant');
@@ -94,6 +95,12 @@ module.exports = (db) => {
   app.get('/health', (req, res) => res.json({ status: 'ok' }));
 
   app.use(`${PREFIX}/auth`, authRoutes(db));
+
+  /* Unauthenticated, and therefore mounted out here with /auth rather than
+     inside the guarded router: the whole point of the demo is that nobody
+     has signed up yet. It refuses itself when the feature is switched off,
+     and services/demo.js meters it when it is on. */
+  app.use(`${PREFIX}/demo`, demoRoutes(db));
 
   /* Everything past here needs a principal and a resolved tenant. */
   const guarded = express.Router();

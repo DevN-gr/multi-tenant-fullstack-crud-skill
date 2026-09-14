@@ -84,6 +84,23 @@ body {
 .meter { height: 6px; background: var(--surface); border-radius: var(--r-1); overflow: hidden; }
 .meter-fill { height: 100%; background: var(--accent); }
 
+/* ── The demo tenant's banner ──────────────────────────────────────────────
+   Inside <main>, above the screen, rather than across the top of the page:
+   the shell is a two-column grid, and a third child would become a row of
+   the grid and push the nav out of it. It is also the honest place for it —
+   it belongs to what is on screen, not to the chrome.
+   ──────────────────────────────────────────────────────────────────────── */
+.demo-banner {
+  display: flex; flex-wrap: wrap; gap: var(--s-1) var(--s-2); align-items: center;
+  justify-content: space-between;
+  margin-block-end: var(--s-2); padding: var(--s-1) var(--s-2);
+  border: 1px solid var(--border); border-radius: var(--r-2);
+  background: var(--surface); color: var(--text-2);
+}
+.demo-banner label { display: flex; gap: var(--s-1); align-items: center; }
+.demo-banner select { font: inherit; background: var(--bg); color: var(--text);
+  border: 1px solid var(--border); border-radius: var(--r-1); padding: 4px var(--s-1); }
+
 .toast-root { position: fixed; inset-block-end: var(--s-2); inset-inline: 0; display: grid; justify-items: center; }
 .toast { background: var(--text); color: var(--bg); padding: var(--s-1) var(--s-2); border-radius: var(--r-2); }
 .toast.error { background: var(--danger); color: #fff; }

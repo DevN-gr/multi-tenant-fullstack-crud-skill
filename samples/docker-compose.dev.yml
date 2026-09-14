@@ -43,6 +43,12 @@ services:
       # wildcard. Direct browser access to :3000 is what needs these; through
       # the web proxy it is same-origin and CORS never comes up.
       CORS_ORIGIN: http://localhost:5173,http://127.0.0.1:5173
+      # On locally, so the landing page's button works in development. A
+      # short life so the sweeper's work is visible within one sitting rather
+      # than tomorrow.
+      DEMO_ENABLED: "true"
+      DEMO_TTL_HOURS: 2
+      DEMO_MAX_LIVE: 5
       SUPERADMIN_EMAIL: superadmin@acme.local
       SUPERADMIN_PASSWORD: development-superadmin
     ports:

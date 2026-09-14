@@ -2,9 +2,13 @@
    Browser smoke test.
 
    run-tests.js proves the rules; backend/test proves the API; this proves the
-   app actually renders and that the two halves fit together. It drives a real
-   Chrome through a real sign-in and every route for every role — and fails on
-   ANY console error, uncaught exception or failed request. That is what
+   app actually renders and that the two halves fit together — including the
+   landing page, which is the first thing a stranger sees and carries the one
+   button in this product pressed by people who have never signed in.
+
+   It drives a real Chrome through a real sign-in and every route for every
+   role — and fails on ANY console error, uncaught exception or failed
+   request. That is what
    catches the class of bug neither unit suite sees: a typo in a template
    string, a null deref inside a view, a field the API renamed and a view
    still asks for.
@@ -27,7 +31,15 @@
 'use strict';
 
 process.env.NODE_ENV = 'test';
-process.env.NODE_CONFIG = JSON.stringify({ log_level: 'silent' });
+/* The demo is off by default, and this suite drives the button that needs it
+   on. `per_ip_minutes: 0` because every request in this process comes from
+   127.0.0.1, so the speed bump would refuse the second one — and the second
+   one is the interesting one: it is pressed while a session is already open.
+   The policy itself is asserted in backend/test/demo.test.js. */
+process.env.NODE_CONFIG = JSON.stringify({
+  log_level: 'silent',
+  demo: { enabled: true, ttl_hours: 24, max_live: 10, per_ip_minutes: 0, sweep_minutes: 15 }
+});
 
 const http = require('http');
 const { once } = require('events');
@@ -66,22 +78,32 @@ const PW = 'smoke-test-password';
   process.env.API_ORIGIN = `http://127.0.0.1:${api.address().port}`;
 
   const { start } = require('./server');
-  const { server, url } = await start(5199);
+  /* Port 0: the OS picks a free one. A fixed port is held by the static
+     server of a run that crashed before its cleanup, and the next run then
+     fails with EADDRINUSE — a failure that names the port rather than the
+     bug, on a suite whose whole job is to name the bug. */
+  const { server } = await start(0);
+  const url = `http://127.0.0.1:${server.address().port}`;
 
   /* The bare URL, before Chrome opens.
 
-     Nothing else in this file asks for `/` — every goto below names
-     app.html — and `/` is precisely what both containers' HEALTHCHECK
-     fetches. It was once mapped to an index.html this app does not have, so
-     it answered 404 while every real request kept working: a web container
-     reported unhealthy for ever, and a deploy that waits on health reading
-     that as a failed release and rolling back. */
-  const rootStatus = await new Promise((done) => {
-    http.get(`${url}/`, (r) => { r.resume(); done(r.statusCode); })
-        .on('error', () => done(0));
+     `/` is the landing page and `/app.html` is the application, and BOTH are
+     asked for here because `/` is precisely what both containers'
+     HEALTHCHECK fetches. It was once mapped to a file this app does not
+     have, so it answered 404 while every real request kept working: a web
+     container reported unhealthy for ever, and a deploy that waits on health
+     reading that as a failed release and rolling back. */
+  const status = (at) => new Promise((done) => {
+    http.get(at, (r) => { r.resume(); done(r.statusCode); }).on('error', () => done(0));
   });
-  check('GET / serves the shell — the URL the healthcheck probes',
+
+  const rootStatus = await status(`${url}/`);
+  check('GET / serves the landing page — the URL the healthcheck probes',
         rootStatus === 200, `status ${rootStatus}`);
+
+  const appStatus = await status(`${url}/app.html`);
+  check('GET /app.html still serves the application shell',
+        appStatus === 200, `status ${appStatus}`);
 
   /* ── Chrome ───────────────────────────────────────────────────────── */
 
@@ -120,6 +142,28 @@ const PW = 'smoke-test-password';
   }
   const seq = () => page.evaluate(() =>
     Number(document.documentElement.getAttribute('data-render-seq') || 0));
+
+  /**
+   * Wait until the browser is on `target`, whatever gets it there.
+   *
+   * Not `waitForNavigation`: that resolves — or rejects into a `catch` — on
+   * its own schedule, and an assertion made the instant it returns can run
+   * before the request that causes the navigation has even been answered.
+   * That reads as "the redirect never happened" when the truth is "not yet".
+   *
+   * Polled from out here rather than inside the page, because the thing being
+   * waited for REPLACES the document, which destroys any execution context a
+   * `waitForFunction` would be polling in.
+   */
+  async function waitForPath(target, timeout = 20000) {
+    const deadline = Date.now() + timeout;
+    while (Date.now() < deadline) {
+      const where = await page.evaluate(() => location.pathname).catch(() => null);
+      if (where === target) return true;
+      await new Promise((done) => setTimeout(done, 250));
+    }
+    return false;
+  }
 
   /**
    * Go to a route and wait for the paint it causes — if it causes one.
@@ -253,6 +297,113 @@ const PW = 'smoke-test-password';
     await page.waitForSelector('#err:not([hidden])');
   });
   check('a wrong password is reported in the form, not as a blank screen', true);
+
+  /* ── The landing page, and the button on it ───────────────────────────
+     The one control on this product that an unknown person presses first. It
+     is driven here for the same reason every form is: from inside the
+     browser, a button that posts to a route that does not exist and a button
+     whose request is refused look identical — nothing happens.
+     ──────────────────────────────────────────────────────────────────── */
+
+  console.log('\nthe landing page');
+
+  /**
+   * Press the demo button and say where it left us.
+   *
+   * The navigation is awaited to `networkidle0`, not merely to the commit:
+   * the button replaces the document, and anything that polls inside the
+   * page — `settledAfter` included — is polling a frame the navigation is
+   * still detaching. Waiting for the new document to go quiet means the app
+   * has already booted and painted by the time anything is asserted.
+   */
+  async function pressTheDemoButton() {
+    await page.goto(`${url}/`, { waitUntil: 'networkidle0' });
+    const navigated = page
+      .waitForNavigation({ waitUntil: 'networkidle0', timeout: 30000 })
+      .catch(() => null);
+    await page.click('#try-demo');
+    await navigated;
+
+    const where = await page.evaluate(() => location.pathname);
+    /* The page says why when it does not navigate, and that message is far
+       more useful in a failing run than "expected /app.html, got /". */
+    const said = await page.$eval('#demo-status', (el) => el.textContent).catch(() => '');
+    return { where, said };
+  }
+
+  await expectingFailure(() => openSignIn());          // arrive as a stranger
+
+  const anonymous = await pressTheDemoButton();
+  check('the demo button hands a stranger a whole tenant',
+        anonymous.where === '/app.html', anonymous.said || anonymous.where);
+  await page.waitForSelector('.demo-banner', { timeout: 20000 });
+
+  const demoOrgs = await db.Organization.count({ where: { is_demo: true } });
+  check('a demo tenant really was provisioned', demoOrgs >= 1, `${demoOrgs} demo tenants`);
+
+  check('the demo says when it goes away',
+        (await page.$eval('.demo-banner', (el) => el.textContent)).includes('deleted'));
+
+  const asOwner = await page.$$eval('.table tbody tr', (rows) => rows.length);
+  check('the demo lands on a screen with data in it', asOwner > 0, `${asOwner} rows`);
+
+  const demoText = await page.evaluate(() => document.body.innerText);
+  check('the demo screen renders without undefined/NaN/[object Object]',
+        !/undefined|NaN|\[object Object\]/.test(demoText), demoText.slice(0, 120));
+
+  /* The switcher is the demo's whole argument: what you see depends on who
+     you are. A <select> is a control, so it is used rather than reasoned
+     about. */
+  const cast = await page.$$eval('[data-action="demo-switch"] option',
+    (options) => options.map((o) => ({ value: o.value, label: o.textContent })));
+  const member = cast.filter((o) => / member$/.test(o.label))[0];
+
+  if (!member) {
+    check('the switcher offers another role', false, cast.map((o) => o.label).join(', '));
+  } else {
+    const before = await seq();
+    await page.select('[data-action="demo-switch"]', member.value);
+    await settledAfter(before);
+
+    const asMember = await page.$$eval('.table tbody tr', (rows) => rows.length);
+    check('switching role changes what the screen shows',
+          asMember < asOwner, `${asMember} rows as a member, ${asOwner} as the owner`);
+
+    const backTo = await page.$$eval('[data-action="demo-switch"] option',
+      (options) => options.filter((o) => / admin$/.test(o.textContent)).length);
+    check('and the way back is still on screen', backTo === 1);
+  }
+
+  /* Pressed a second time, from a browser that is already holding a session.
+     The API demands the CSRF header from anything carrying a session cookie,
+     so this is the press that fails 403 if the landing page — which does not
+     load js/api.js — forgot to echo the token itself. */
+  await signIn(seeded.admin.email);
+  const returning = await pressTheDemoButton();
+  check('the button still works for a browser that already has a session',
+        returning.where === '/app.html', returning.said || returning.where);
+  await page.waitForSelector('.demo-banner', { timeout: 20000 });
+
+  /* ── An expired demo shows somebody the door ────────────────────────
+     Every request the open screen makes is refused from here on, and Chrome
+     logs each 403 as a console error. That is the correct behaviour being
+     exercised rather than noise, so it is forgiven exactly here — and only
+     here, and only for the length of this step.
+     ──────────────────────────────────────────────────────────────────── */
+
+  let shownTheDoor = false;
+  await expectingFailure(async () => {
+    await db.Organization.update(
+      { expires_at: new Date(Date.now() - 1000) },
+      { where: { is_demo: true } }
+    );
+    await page.evaluate(() => { location.hash = '#/tasks'; });
+    shownTheDoor = await waitForPath('/');
+  });
+
+  check('an expired demo puts the visitor back on the landing page',
+        shownTheDoor && (await page.$('#try-demo')) !== null,
+        await page.evaluate(() => location.pathname));
 
   /* ── Report ───────────────────────────────────────────────────────── */
 

@@ -30,6 +30,13 @@ process.on('unhandledRejection', (err) => {
   const app = require('../app')(db);
   const server = http.createServer(app);
 
+  /* Expired demo tenants are deleted from here rather than from a cron entry
+     on the box: it is the process that already holds the pool, and a
+     scheduled job that needs its own database credentials is a second place
+     for those credentials to live. It sweeps once now and then on an
+     interval, and returns null when the demo is switched off. */
+  const sweeper = require('../services/demo').startSweeper(db);
+
   server.listen(PORT, () => {
     logger.info({ port: PORT, env: db.ENVIRONMENT }, 'Acme API listening');
   });
@@ -38,6 +45,7 @@ process.on('unhandledRejection', (err) => {
      the pool cleanly avoids a half-written transaction on every deploy. */
   const shutdown = async (signal) => {
     logger.info({ signal }, 'Shutting down');
+    if (sweeper) sweeper.stop();
     server.close(async () => {
       try { await db.close(); } catch (e) { /* already gone */ }
       process.exit(0);

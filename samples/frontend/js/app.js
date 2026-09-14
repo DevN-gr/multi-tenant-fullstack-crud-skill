@@ -55,6 +55,8 @@ window.App = (function () {
     name_required: 'A name is required.',
     workspace_out_of_scope: 'That workspace is outside your access.',
     unauthenticated: 'Your session has ended. Sign in again.',
+    demo_expired: 'This demo has ended and its data has been deleted.',
+    not_found: 'That is no longer there.',
     offline: 'No connection to the server.',
     server_error: 'Something went wrong. Nothing was saved.'
   };
@@ -149,6 +151,53 @@ window.App = (function () {
     });
   }
 
+  /**
+   * How long a demo tenant has left, in words.
+   *
+   * Deliberately vague — "in about 22 hours" rather than a countdown to the
+   * second — because the number is a reassurance, not a deadline, and a
+   * ticking clock in the corner of a product somebody is evaluating reads as
+   * pressure. Anything that cannot be worked out is said as "soon" rather
+   * than rendered: a banner reading "deleted in NaN hours" fails the browser
+   * suite, and deserves to.
+   */
+  function remaining(at) {
+    var ms = new Date(at).getTime() - Date.now();
+    if (!isFinite(ms) || ms <= 0) return 'very soon';
+    var hours = Math.round(ms / 3600000);
+    if (hours >= 2) return 'in about ' + hours + ' hours';
+    var minutes = Math.max(1, Math.round(ms / 60000));
+    return 'in about ' + minutes + (minutes === 1 ? ' minute' : ' minutes');
+  }
+
+  /**
+   * The banner a demo tenant wears, and the only thing in the app that knows
+   * it is a demo at all.
+   *
+   * The cast comes from the principal rather than from `Store.users()`: the
+   * role somebody switches TO may not be able to list the role they came
+   * from, so a switcher built from the staff list loses the way back on its
+   * first use. See services/sessions.js.
+   */
+  function demoBanner() {
+    var user = Store.currentUser();
+    var demo = user && user.demo;
+    if (!demo) return '';
+
+    var options = (demo.cast || []).map(function (member) {
+      return '<option value="' + U.esc(String(member.id)) + '"' +
+        (String(member.id) === String(user.id) ? ' selected' : '') + '>' +
+        U.esc(member.name + ' — ' + member.user_type) + '</option>';
+    }).join('');
+
+    return '<div class="demo-banner">' +
+      '<span>Demo — everything here is deleted ' + U.esc(remaining(demo.expires_at)) +
+      '. Please do not enter real data.</span>' +
+      (options ? '<label>Signed in as <select data-action="demo-switch">' + options +
+        '</select></label>' : '') +
+      '</div>';
+  }
+
   function shell(active, body) {
     var user = Store.currentUser();
     var items = (NAV[user.user_type] || []).map(function (name) {
@@ -160,7 +209,7 @@ window.App = (function () {
          that can be signed in can sign out, including the platform account,
          which holds no tenant capability at all. */
       '<button class="signout" type="button" data-action="sign-out">Sign out</button>' +
-      '</nav><main class="main">' + body + '</main>';
+      '</nav><main class="main">' + demoBanner() + body + '</main>';
   }
 
   /**
@@ -169,11 +218,38 @@ window.App = (function () {
    * a slow screen takes to load and a control somebody can see has to work.
    */
   function mountShell(root) {
+    var picker = U.el('[data-action="demo-switch"]', root);
+    if (picker) {
+      picker.addEventListener('change', function () { switchDemoUser(picker.value); });
+    }
+
     var out = U.el('[data-action="sign-out"]', root);
     if (!out) return;
     out.addEventListener('click', function (ev) {
       ev.preventDefault();
       signOut();
+    });
+  }
+
+  /**
+   * Become another member of the demo tenant's cast.
+   *
+   * The new role may not be allowed on the screen the old one was looking at,
+   * so it lands on the new role's home rather than staying put and painting a
+   * refusal. Assigning the hash the browser is already on fires no
+   * hashchange, so that case renders directly — the same trap the browser
+   * suite documents.
+   */
+  function switchDemoUser(id) {
+    return Store.switchDemoUser(id).then(function (res) {
+      if (!res || res.ok === false) {
+        toast(errorText(res && res.error), 'error');
+        return render();
+      }
+      var home = homeRoute();
+      if (location.hash === home) return render();
+      location.hash = home;
+      return Promise.resolve();
     });
   }
 
@@ -232,13 +308,22 @@ window.App = (function () {
   function start() {
     window.addEventListener('hashchange', render);
     API.on('unauthorized', function () { location.hash = '#/login'; render(); });
+
+    /* A demo tenant that ran out while somebody was using it has no data left
+       to show and no session worth keeping, so the app hands them back to the
+       landing page, where they can start another one. `replace` rather than
+       `assign`: the Back button must not return to an application that can no
+       longer load a single screen. */
+    API.on('demo-expired', function () { location.replace('/'); });
+
     return Store.boot().then(render);
   }
 
   return {
     ROUTES: ROUTES, NAV: NAV, ERROR_TEXT: ERROR_TEXT,
     start: start, render: render, after: after, errorText: errorText,
-    parseHash: parseHash, homeRoute: homeRoute, toast: toast, closeModal: closeModal
+    parseHash: parseHash, homeRoute: homeRoute, toast: toast, closeModal: closeModal,
+    remaining: remaining, demoBanner: demoBanner
   };
 })();
 

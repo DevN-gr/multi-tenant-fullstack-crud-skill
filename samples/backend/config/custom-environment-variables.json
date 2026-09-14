@@ -24,6 +24,12 @@
     }
   },
 
+  "demo": {
+    "enabled": { "__name": "DEMO_ENABLED", "__format": "json" },
+    "ttl_hours": { "__name": "DEMO_TTL_HOURS", "__format": "json" },
+    "max_live": { "__name": "DEMO_MAX_LIVE", "__format": "json" }
+  },
+
   "superadmin": {
     "email": "SUPERADMIN_EMAIL",
     "password": "SUPERADMIN_PASSWORD",

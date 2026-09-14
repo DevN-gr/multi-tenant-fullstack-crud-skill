@@ -30,6 +30,15 @@
     "smtp": { "host": "", "port": 587, "secure": false, "user": "", "password": "" }
   },
 
+  "demo": {
+    "_comment": "A throwaway tenant anybody can provision from the landing page, with no sign-up, deleted whole when it expires. OFF by default: it lets an unauthenticated visitor write to the same database the product runs on, which is a decision to take deliberately rather than inherit from a sample. max_live is the ceiling on how much of that database a bad afternoon can cost; per_ip_minutes keeps one visitor from spending the ceiling alone.",
+    "enabled": false,
+    "ttl_hours": 24,
+    "max_live": 25,
+    "per_ip_minutes": 10,
+    "sweep_minutes": 15
+  },
+
   "superadmin": {
     "_comment": "Bootstrapped on first boot when the users table is empty, so a fresh deployment has somebody who can create the first owner. Set a real password through the environment; the default one is refused outside development.",
     "email": "superadmin@example.com",
