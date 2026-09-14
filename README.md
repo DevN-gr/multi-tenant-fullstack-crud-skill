@@ -38,6 +38,8 @@ Its annotated files document not just what the architecture does, but why partic
 
 * **Ships behavior with a regression test.** New behavior gets a test that fails before the change and passes afterward; a bug fix first reproduces the bug.
 
+* **Writes for the box the app is actually going on.** A VPS shared with other applications gets a compose file with no proxy, no published ports and a project prefix on every name it introduces, because `db_data` and a router called `web` are names the neighbours want too — and the collisions that matter resolve silently.
+
 * **Offers automatic deployment at the moment it becomes relevant, and asks first.** A first deployment, a question about making the app publicly accessible, or an MVP about to be used is when push-to-main CI is worth raising — as a question, together with whether the VPS hosts anything else, because that answer decides every name placed on that box.
 
 * **Offers a landing page at the same moment, built from what the product does today.** A feature list written from the roadmap is a support ticket per line. The page is a separate document that loads none of the application, because a marketing page that boots the app answers 401 to every visitor before it paints.
@@ -374,6 +376,22 @@ flowchart TB
 ```
 
 The database is kept on an internal network and is not published to the host.
+
+### Shared hosting
+
+`samples/docker-compose.shared.yml` is the same deployment for a VPS whose Docker daemon already serves other applications: ports 80 and 443 are taken and a proxy is already terminating TLS against one certificate store.
+
+It is the full file minus the edge — no proxy, no ACME resolver, no published ports — plus a namespace. Every name it introduces is prefixed with the project, because service names, container names, image tags, volumes, networks and Traefik router names live in namespaces with different scopes and different failure modes. A service-name collision is loud and immediate; a volume collision is silent and gives two applications one database directory; an image-tag collision retags somebody else's `web:latest`.
+
+It joins the host's proxy network as `external`, so stopping this app cannot remove the network the rest of the box is routed through, and keeps its own internal network for the database plus a one-container egress network for outbound mail — an internal network has no gateway, so the failure would otherwise appear at the first password reset rather than at boot.
+
+The host supplies three names that are not guessable — the proxy's network, its HTTPS entrypoint and its certificate resolver — through a project-named env file, and pulls the app in:
+
+```yaml
+include:
+  - path: ./acme/docker-compose.shared.yml
+    env_file: ./acme.env
+```
 
 The API image:
 

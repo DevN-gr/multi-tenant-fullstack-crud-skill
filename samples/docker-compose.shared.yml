@@ -1,0 +1,248 @@
+# ══════════════════════════════════════════════════════════════════════════
+#  Acme — production, on a box that already has an edge.
+#
+#  docker-compose.yml is the whole deployment: Traefik, TLS, the app. This
+#  file is the app ALONE, for a VPS already running a proxy in front of other
+#  people's sites — :80 and :443 are taken, and one certificate store is
+#  easier to reason about than two. Pull it into that host's compose file:
+#
+#      # /srv/<host>/docker-compose.yml
+#      include:
+#        - path: ./acme/docker-compose.shared.yml
+#          env_file: ./acme.env
+#
+#  The host supplies, in that env file:
+#
+#      TRAEFIK_NETWORK       the network its proxy is on. `docker network ls`
+#                            — a compose-managed one is <project>_<key>, so it
+#                            is rarely just `web`.
+#      TRAEFIK_ENTRYPOINT    the name of its HTTPS entrypoint
+#      TRAEFIK_CERTRESOLVER  the name of its ACME resolver
+#
+#          docker inspect <traefik container> --format '{{json .Config.Cmd}}' \
+#            | tr ',' '\n' | grep -E 'entrypoints|certificatesresolvers'
+#
+#  plus everything in .env.example. Name that file `acme.env`, NOT `.env` —
+#  the host's own project already owns `.env` and reads it implicitly.
+#
+#  ── Why every name in here is prefixed ──────────────────────────────────
+#  Because this file joins somebody else's compose project, where `web`,
+#  `db` and `internal` are names another application wants too, and the
+#  namespaces have different scopes and different failure modes:
+#
+#    service name      the merged project      loud, at config time
+#    container_name    the whole daemon        loud — but possibly THEIR
+#                                              redeploy failing, weeks later
+#    image tag         the whole daemon        SILENT: `--build` retags their
+#                                              web:latest and their next `up`
+#                                              starts this app on their domain
+#    volume            the INCLUDING project   SILENT: two apps asking for
+#                                              db_data share one data dir
+#    network `name:`   the whole daemon        joining the wrong `internal`
+#                                              puts this database on a network
+#                                              their PHP container can reach
+#    traefik router    the whole Traefik       SILENT: one router wins, the
+#                                              other host 404s
+#
+#  So: service, container, image, volume, network, router, service and
+#  middleware names all carry `acme_`. The two exceptions are genuinely the
+#  host's — the external network, whose name comes from a variable, and the
+#  environment variable names the app already reads.
+#
+#  ── Operating it ────────────────────────────────────────────────────────
+#  NEVER `docker compose down` here. This is the host's project: down stops
+#  their services too. Name yours, always:
+#
+#      docker compose up -d --build acme_web acme_api
+#      docker compose stop acme_web acme_api
+#      docker compose exec acme_db mysql -u"$MYSQL_USER" -p"$MYSQL_PASSWORD" acme
+#
+#  ops/acme-deploy.sh already works this way: its SERVICES array is what
+#  keeps a deploy from rebuilding the neighbours. On a shared box set
+#  SERVICES=(acme_web acme_api) and point COMPOSE_DIR at the host's
+#  directory.
+# ══════════════════════════════════════════════════════════════════════════
+
+# No `name:` — an included file's project name is ignored anyway, and the
+# host's project is what everything is prefixed with. See the volume note.
+
+services:
+  # ───────────────────────── Web ─────────────────────────
+  # The only container the edge can see, and the only one carrying labels.
+  # The browser reaches the API through this container's /v1/api proxy, so
+  # there is one hostname, one certificate and one origin — which is what
+  # lets the session cookie work without CORS.
+  acme_web:
+    build:
+      context: .
+      dockerfile: frontend/Dockerfile
+    image: acme_web:latest
+    container_name: acme_web
+    restart: always
+    expose:
+      - "3010"
+    environment:
+      PORT: 3010
+      HOST: 0.0.0.0
+      API_ORIGIN: http://acme_api:3000
+    depends_on:
+      acme_api:
+        condition: service_started
+    labels:
+      - traefik.enable=true
+      # Mandatory the moment a container is on more than one network: without
+      # it Traefik picks an address itself and can pick the one on
+      # acme_internal, which has no route in. The symptom is a 504 with
+      # nothing in this app's logs, because the request never arrived.
+      - traefik.docker.network=${TRAEFIK_NETWORK}
+      - traefik.http.routers.acme_web.rule=Host(`${APP_HOST}`)
+      - traefik.http.routers.acme_web.entrypoints=${TRAEFIK_ENTRYPOINT:-websecure}
+      - traefik.http.routers.acme_web.tls.certresolver=${TRAEFIK_CERTRESOLVER:-le}
+      - traefik.http.routers.acme_web.service=acme_web
+      - traefik.http.services.acme_web.loadbalancer.server.port=3010
+      # Middlewares defined HERE rather than asked of the host's Traefik
+      # config: this file should bring what it needs and require nothing of
+      # theirs but the three names above.
+      - traefik.http.routers.acme_web.middlewares=acme_security@docker,acme_gzip@docker
+      - traefik.http.middlewares.acme_security.headers.stsSeconds=31536000
+      - traefik.http.middlewares.acme_security.headers.stsIncludeSubdomains=true
+      # and deliberately no stsPreload: preload asks browsers to force HTTPS
+      # on the parent domain AND its subdomains. On a shared box the parent is
+      # somebody else's, and their plain-HTTP sibling host is not ours to
+      # break.
+      - traefik.http.middlewares.acme_security.headers.frameDeny=true
+      - traefik.http.middlewares.acme_security.headers.contentTypeNosniff=true
+      - traefik.http.middlewares.acme_security.headers.browserXssFilter=true
+      - traefik.http.middlewares.acme_security.headers.referrerPolicy=strict-origin-when-cross-origin
+      - traefik.http.middlewares.acme_gzip.compress=true
+    logging:
+      driver: json-file
+      options: { max-size: "10m", max-file: "10", compress: "true" }
+    networks:
+      - acme_edge
+      - acme_internal
+
+  # ───────────────────────── API ─────────────────────────
+  # No labels, no router, no ports: reached only through the web container's
+  # proxy. The full deployment also publishes it on its own API_HOST; that is
+  # a second hostname to certificate and a second origin to allow, and on a
+  # shared box it buys nothing a proxied path does not already give.
+  acme_api:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+    image: acme_api:latest
+    container_name: acme_api
+    restart: always
+    expose:
+      - "3000"
+    environment:
+      # Fixed by the shape of the deployment rather than by an operator's
+      # choice — so they are set here and NOT offered in the env file.
+      NODE_ENV: production
+      PORT: 3000
+      COOKIE_SECURE: "true"
+      APP_URL: https://${APP_HOST}
+      CORS_ORIGIN: https://${APP_HOST}
+      MAIL_TRANSPORT: smtp
+      MYSQL_HOST: acme_db
+      MYSQL_PORT: 3306
+      # Operator's, from acme.env
+      MYSQL_DATABASE: ${MYSQL_DATABASE}
+      MYSQL_USER: ${MYSQL_USER}
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD}
+      JWT_SECRET: ${JWT_SECRET}
+      COOKIE_DOMAIN: ${COOKIE_DOMAIN}
+      SMTP_HOST: ${SMTP_HOST}
+      SMTP_PORT: ${SMTP_PORT}
+      SMTP_SECURE: ${SMTP_SECURE}
+      SMTP_USER: ${SMTP_USER}
+      SMTP_PASSWORD: ${SMTP_PASSWORD}
+      MAIL_FROM_ADDRESS: ${MAIL_FROM_ADDRESS}
+      MAIL_FROM_NAME: ${MAIL_FROM_NAME}
+      DEMO_ENABLED: ${DEMO_ENABLED:-false}
+      DEMO_TTL_HOURS: ${DEMO_TTL_HOURS:-24}
+      DEMO_MAX_LIVE: ${DEMO_MAX_LIVE:-25}
+      SUPERADMIN_EMAIL: ${SUPERADMIN_EMAIL}
+      SUPERADMIN_PASSWORD: ${SUPERADMIN_PASSWORD}
+      SUPERADMIN_NAME: ${SUPERADMIN_NAME:-Acme}
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+      DB_LOGGING: ${DB_LOGGING:-false}
+    depends_on:
+      acme_db:
+        condition: service_healthy
+    logging:
+      driver: json-file
+      options: { max-size: "10m", max-file: "10", compress: "true" }
+    networks:
+      - acme_internal
+      # Outbound only, and only this service. An internal network has no
+      # gateway, so a container alone on one cannot resolve an SMTP relay let
+      # alone reach it — and nothing fails at boot. The first password reset
+      # returns a 500 instead, weeks later, which is a much worse way to find
+      # out. This is the one door, and it opens one way.
+      - acme_egress
+
+  # ───────────────────────── MySQL ─────────────────────────
+  # Not published and not on the edge. Reach it with
+  # `docker compose exec acme_db …` — a 3306:3306 here is a MySQL on the
+  # public internet, and it is always added "temporarily".
+  acme_db:
+    image: mysql:8.0
+    container_name: acme_db
+    restart: always
+    command: --character-set-server=utf8mb4 --collation-server=utf8mb4_unicode_ci
+    environment:
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD}
+      MYSQL_DATABASE: ${MYSQL_DATABASE}
+      MYSQL_USER: ${MYSQL_USER}
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD}
+    volumes:
+      - acme_db_data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "127.0.0.1", "-u", "${MYSQL_USER}", "-p${MYSQL_PASSWORD}"]
+      interval: 10s
+      timeout: 5s
+      retries: 15
+    # Unbounded json-file logging on a shared box does not fill YOUR disk, it
+    # fills THE disk, and the first thing to fall over is whoever writes next.
+    logging:
+      driver: json-file
+      options: { max-size: "10m", max-file: "3", compress: "true" }
+    networks:
+      - acme_internal
+
+volumes:
+  # Becomes <hostproject>_acme_db_data: a volume in an included file takes the
+  # INCLUDING project's prefix, and that project name comes from the host's
+  # deploy directory. So two things follow. The `acme_` here is the only thing
+  # keeping this from being the `db_data` another app on the box also asked
+  # for — and if the host ever renames or moves that directory, this app comes
+  # up with an empty database and no error at all. If the data must survive
+  # that, declare it `external: true` with an explicit name and create it once
+  # by hand:  docker volume create acme_db_data
+  acme_db_data:
+
+networks:
+  # Joined, never owned: `external` means a `docker compose down` on this app
+  # cannot remove the network the rest of the box is routed through.
+  #
+  # Check the resolved name, not the exit code: with TRAEFIK_NETWORK unset,
+  # `docker compose config` exits 0 with a warning and this comes out as
+  # `external: true` with no name — a lookup for a network called `acme_edge`
+  # that does not exist on that box, failing at `up` rather than at config.
+  acme_edge:
+    external: true
+    name: ${TRAEFIK_NETWORK}
+
+  # No route in, no route out. The host's other sites are not on it, which is
+  # the whole difference between "deployed on a shared box" and "sharing a
+  # box".
+  acme_internal:
+    name: acme_internal
+    internal: true
+
+  # One container, outbound only. It NATs out; because nothing else is
+  # attached, nothing on the box can reach in through it.
+  acme_egress:
+    name: acme_egress

@@ -448,6 +448,203 @@ end.
 `bin/www` handles `SIGTERM`: in-flight requests finish and the pool closes
 cleanly, so a deploy does not leave a half-written transaction.
 
+### Deploying onto a box that already has an edge
+
+A VPS this app has to itself takes `docker-compose.yml` above. A VPS that
+already runs other people's sites takes `samples/docker-compose.shared.yml`
+instead — which is why "does this box run anything else?" is a question to ask
+before writing either one. "Shared" here means **one Docker daemon serving
+several unrelated applications**: `:80` and `:443` are taken, a Traefik or
+nginx-proxy or Caddy already terminates TLS against one certificate store,
+there may be a `db`, a `web` and a `redis` that belong to somebody else, and a
+`docker compose down` in the wrong directory takes their site off the internet
+along with yours.
+
+That file is `docker-compose.yml` **minus the edge, plus a namespace**. It is a
+second file rather than an edit, because the full one is still right for a box
+this app has to itself.
+
+**What is dropped, and it is worth saying in a comment why:** the proxy and its
+`:80`/`:443` binding, the ACME resolver and its certificate volume, any log
+shipper or metrics stack, and **every `ports:` mapping without exception**.
+
+**What to establish first**, because none of it is guessable and most of it is
+about *their* box:
+
+1. **Which services are the app and which are the platform.** Only the first
+   group survives. Here: `web`, `api`, `db` stay; `traefik` and `letsencrypt`
+   go.
+2. **What the host's edge is called** — the **network** its proxy is on, the
+   **HTTPS entrypoint** name, the **certificate resolver** name. Take all three
+   as variables, never as literals. A compose-managed network is
+   `<project>_<key>`, so it is rarely just `web`.
+3. **What names are already taken**: `docker ps -a --format '{{.Names}}'`,
+   `docker volume ls`, `docker network ls`, `docker image ls`.
+4. **Whether the file will be `include:`d into the host's compose file or run
+   as its own project.** Ask — it decides what collides. Included is the usual
+   answer where one operator runs the box.
+5. **What the app needs from outside**: the browser reaching one container, and
+   the app reaching an SMTP relay. Nothing not on that list gets a route in
+   either direction — that is the entire security argument for putting an app
+   on somebody else's box.
+6. **Whether anything of the host's mounts the Docker socket.** Theirs is
+   theirs. **You do not get to add a second mount**, and you do not ship the
+   log pipeline: a container reading `/var/run/docker.sock` and
+   `/var/lib/docker/containers` sees *every* container on the box. On your own
+   VPS that is observability; on a shared one it is exfiltration with a
+   dashboard.
+
+#### Prefix every name the file introduces
+
+Not the ones that look risky — all of them: `acme_web`, `acme_db`,
+`acme_internal`, `acme_db_data`, `acme_security`. Take the prefix from the
+project, never from the role: `acme_db`, not `app_db`, because `app` is the
+name every application thinks it has.
+
+It is not obvious because the namespaces have **different scopes**, and the
+ones that collide most quietly are the ones that look safest:
+
+| What | Scope | A collision |
+|---|---|---|
+| service name | the merged compose project | **Loud**, at config time: `services.web conflicts with imported resource`. The best case here. |
+| `container_name` | the whole daemon | Loud, but possibly on the wrong side — *their* redeploy failing weeks later with your name in the error. |
+| image tag | the whole daemon | **Silent.** Your `--build` retags their `web:latest`; their next `up` starts your app under their domain. |
+| volume | the **including** project | **Silent.** Two apps asking for `db_data` share one MySQL data directory. |
+| network `name:` | the whole daemon, verbatim | Joining the wrong `internal` puts your database where their PHP container can reach it. |
+| Traefik router / service / middleware | the whole Traefik | **Silent.** Two routers named `web`: one wins, the other host 404s. The explanation is in *their* log. |
+| published port | the host's port space | Loud — and the reason to publish nothing. |
+
+Both halves of that are verified rather than remembered. The same file
+unprefixed, included into a project that has its own `web`, fails with
+`services.web conflicts with imported resource`. Prefixed everywhere *except*
+the volume, it resolves with **exit 0 and no warning** — and both databases
+come out pointing at one `hostproject_db_data`.
+
+#### Three networks, and the third is the interesting one
+
+- **`acme_edge`** — `external: true`, `name: ${TRAEFIK_NETWORK}`. External
+  means you *join* it and never own it, so `down` on your app cannot remove the
+  network the rest of the box is routed through. Only the one container the
+  browser talks to is attached.
+- **`acme_internal`** — `internal: true`. No route in, no route out. The
+  database and anything else nobody outside should reach. The host's other
+  sites are not on it, which is the difference between *deployed on* a shared
+  box and *sharing* one.
+- **`acme_egress`** — an ordinary bridge with exactly one container on it, for
+  the service that must dial out. It NATs outbound; since nothing else is
+  attached, nothing on the box can reach in through it. Wider than `internal`
+  by one service and one direction. Skip it only if nothing in the app ever
+  dials out — and check, because mail almost always does.
+
+**Traefik labels go on exactly one service**, with the router, the service and
+every middleware named for the project, and the middlewares defined in your own
+labels rather than asked of the host's configuration: the file should bring
+what it needs and require nothing of theirs but the three names. Everything
+else gets no labels, no ports and no router; if the browser needs the API it is
+proxied through the exposed container, which is also what keeps one hostname,
+one certificate and one origin.
+
+#### What bites
+
+1. **`name:` in an included file is ignored, and volumes take the *host's*
+   project prefix.** Verified: a volume `acme_db_data` pulled into a project
+   named `hostproject` resolves to `hostproject_acme_db_data`. So the prefix is
+   the only thing keeping it separate — **and** the volume's real name depends
+   on the directory the host deploys from. Rename or move that directory and
+   the app comes up with an empty database and no error. If the data must
+   survive that, declare the volume `external: true` with an explicit name and
+   create it once by hand.
+2. **A container on two networks makes Traefik guess, and it guesses wrong.**
+   Without `traefik.docker.network` it may route to the address on the internal
+   network, which has no route in. The symptom is a 504 with nothing in your
+   logs, because the request never arrived. Set it from the same variable as
+   the network, and treat it as mandatory the moment a container is on more
+   than one.
+3. **Relative paths in an included file resolve against *that file's*
+   directory; `env_file:` resolves against the *including* file's.** Verified:
+   `context: .` came out as the absolute path of the included file's own
+   directory, so the checkout your file lives in is the one that gets built,
+   wherever the host's compose file sits. That is what you want, and the
+   opposite of what most people assume.
+4. **`internal: true` breaks outbound mail at the first invite, not at boot.**
+   An internal network has no gateway, so a container alone on one cannot
+   resolve an SMTP relay, let alone reach it. Nothing fails at startup; the
+   first password reset returns a 500. That is what the egress network is for.
+5. **Do not copy `stsPreload` into the shared file.** Preload asks browsers to
+   force HTTPS on a domain *and its subdomains*; on a shared box the parent
+   domain is somebody else's and their plain-HTTP sibling host is not yours to
+   break. Keep `stsSeconds` and `stsIncludeSubdomains`.
+6. **Every service gets a `logging:` block with `max-size` and `max-file`.**
+   Default json-file logging is unbounded, and on a shared box a chatty
+   container does not fill *your* disk, it fills *the* disk — and the first
+   thing to fall over is whoever writes next.
+7. **Never run a bare `docker compose down` in a shared project directory**,
+   and say so in the file's header: it stops the host's services too. The verbs
+   are `up -d --build <your services>` and `stop <your services>`, named
+   explicitly — which is also why `ops/<project>-deploy.sh` takes a `SERVICES`
+   array rather than acting on the whole project. On a shared box that array
+   holds the prefixed names and `COMPOSE_DIR` points at the host's directory.
+8. **Publish no ports, then say how to reach the database anyway** —
+   `docker compose exec acme_db …`. A `3306:3306` on a shared box is a MySQL on
+   the public internet, and it is always added "temporarily".
+9. **An optional heavy service goes behind a `profiles:` key.** A migration or
+   import tool that runs twice a year should not sit in somebody else's RAM for
+   the other 363 days. This stack has none, which is why the file has no
+   `profiles:` — do not add one for a service that always runs.
+
+#### Prove it without the host, and without a daemon
+
+```bash
+TRAEFIK_NETWORK=edge_net docker compose -f docker-compose.shared.yml config
+
+mkdir -p /tmp/h && cat > /tmp/h/docker-compose.yml <<'EOF'
+name: hostproject
+include:
+  - path: /abs/path/docker-compose.shared.yml
+    env_file: ./acme.env
+EOF
+docker compose -f /tmp/h/docker-compose.yml config
+```
+
+Then read **the output, not your input**, and check four things: every volume,
+container, network and Traefik label carries the prefix; the edge network is
+`external: true`; no service has `ports:`; and the build contexts point at your
+checkout rather than the host's directory. Give the host project its own `web`
+and `db` while you are there — a test where nothing could have collided has
+proved nothing.
+
+Then diff the environment block against `docker-compose.yml`. A variable in one
+and not the other is a deployment that behaves differently for reasons nobody
+will find, and `npm run check` reads every `docker-compose*.yml` in the root, so
+it covers the new file automatically.
+
+#### The host-side steps
+
+Only they can do these:
+
+1. Find the three edge names on the box and put them in the env file.
+2. Copy `.env.example` to a **project-named** file beside the host's compose
+   file — `acme.env`, not `.env`, which their project already owns and reads
+   implicitly.
+3. Add the `include:` block, then run `docker compose config` **before** `up`,
+   which costs a second and touches nothing running. It catches a service-name
+   conflict outright — but **a missing variable is only a warning**. Verified:
+   with `TRAEFIK_NETWORK` unset, `config` exits 0 and the edge network comes
+   out as `external: true` with no name at all, which silently becomes a
+   lookup for a network called `acme_edge` that does not exist on that box,
+   and the failure lands at `up` instead. So read the resolved network name
+   out of the output rather than trusting the exit code — in a wall of
+   "variable is not set" warnings, the one that matters does not stand out.
+4. `docker compose up -d --build acme_web acme_api`, naming the services.
+5. Point DNS at the box only once the containers are healthy. The ACME
+   challenge needs the record, but a certificate issued to a 504 is a rate
+   limit spent for nothing.
+
+And say what the shared file does **not** carry: no log shipping and no
+metrics, so `docker logs` or the host's own stack; and backups are now the
+host's problem, where a volume hiding under someone else's project prefix is
+easy to miss in a backup script.
+
 ---
 
 ## When the MVP is ready
@@ -509,7 +706,10 @@ Two questions before writing any of it:
    mysteriously waiting on another's, months later. The same answer decides
    whether Traefik is yours to restart (it is not, if it fronts anything else),
    whether `docker image prune` is safe box-wide, and whether a
-   `Host github.com` block in `~/.ssh/config` would break somebody else's pull.
+   `Host github.com` block in `~/.ssh/config` would break somebody else's
+   pull. It also decides which compose file is deployed at all: a box that
+   already has an edge takes `docker-compose.shared.yml` — see **Deploying
+   onto a box that already has an edge** above.
 
 **Say what the gate costs before building it.** Public repositories get Actions
 minutes free; private ones get 2,000 a month on Free and 3,000 on Pro, then

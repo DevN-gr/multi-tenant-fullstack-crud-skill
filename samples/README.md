@@ -29,6 +29,7 @@ name:
 | `backend/middleware/auth.js`, `csrf.js` | httpOnly session cookie plus the CSRF token it forces you to pay for. |
 | `backend/test/http.js` | A cookie-jar client with a bounded timeout per request. |
 | `tools/server.js` | Static server + API proxy, so the app and the API are one origin. |
+| `docker-compose.shared.yml` | The app without an edge, for a box that already has one. Rename the prefix; the namespacing, the three networks and the `external` edge are the point. |
 | `frontend/js/api.js` | Errors as values, one silent 401 retry, CSRF echoed from a readable cookie. |
 | `ops/acme-deploy.sh` | The deploy half of push-to-main. Rename the file, the lock and the container names; the refusal, the rollback and the lock are the point. |
 | `ops/test-deploy.sh` | Drives that script through every path — including the rollback — with a real git repository and a stubbed `docker`. |
